@@ -10,8 +10,14 @@
  */
 
 export type Config = {
-  /** GitHub organization whose public, non-archived, non-fork repositories are listed. */
+  /** GitHub organization whose projects are listed. */
   githubOrg: string;
+  /**
+   * The opt-in topic: only repositories carrying it are projects. Keeps
+   * infrastructure (`.github`, `homebrew-tap`) and dormant experiments out
+   * without a list in code. `scripts/tag-active-repos.ts` applies it.
+   */
+  githubTopic: string;
   /** Optional token: raises GitHub's limit from 60 to 5,000 requests an hour. */
   githubToken?: string;
   /** Numeric crates.io user id whose crates are listed (swernerx: 385008). */
@@ -22,9 +28,21 @@ export type Config = {
   userAgent: string;
 };
 
-export type RepoMetrics = { stars: number; forks: number; pushedAt: string };
-export type CrateMetrics = { version: string; downloads: number; recentDownloads: number };
-export type PackageMetrics = { version: string; monthlyDownloads: number };
+export type RepoMetrics = { stars: number; forks: number };
+/** `repo` names the organization repository the package links to, when it does. */
+export type CrateMetrics = {
+  version: string;
+  downloads: number;
+  recentDownloads: number;
+  publishedAt: string;
+  repo?: string;
+};
+export type PackageMetrics = {
+  version: string;
+  monthlyDownloads: number;
+  publishedAt: string;
+  repo?: string;
+};
 export type SourceStatus = "error" | "ok";
 
 export type Metrics = {
@@ -61,6 +79,14 @@ function count(record: Record<string, unknown>, key: string): number | undefined
   return typeof value === "number" ? value : undefined;
 }
 
+/** "https://github.com/sebastian-software/ferroni.git" → "ferroni", for the configured org only. */
+export function repoOf(url: unknown, org: string): string | undefined {
+  if (typeof url !== "string") return undefined;
+  const escaped = org.replaceAll(/[.*+?^${}()|[\]\\]/gu, String.raw`\$&`);
+  const match = new RegExp(String.raw`github\.com[/:]${escaped}/([^/#?]+?)(?:\.git)?(?:[/#?]|$)`, "iu").exec(url);
+  return match?.[1];
+}
+
 async function getJson(
   fetchImpl: Fetch,
   url: string,
@@ -83,13 +109,12 @@ export async function collectGithub(fetchImpl: Fetch, config: Config) {
     const { body, next }: { body: unknown; next?: string } = await getJson(fetchImpl, url, headers);
     for (const repo of Array.isArray(body) ? (body as unknown[]) : []) {
       if (!isRecord(repo) || repo.archived === true || repo.fork === true) continue;
+      const topics = Array.isArray(repo.topics) ? repo.topics : [];
+      if (!topics.includes(config.githubTopic)) continue;
       const name = text(repo, "name");
       const stars = count(repo, "stargazers_count");
       const forks = count(repo, "forks_count");
-      const pushedAt = text(repo, "pushed_at");
-      if (name && stars !== undefined && forks !== undefined && pushedAt) {
-        repos[name] = { stars, forks, pushedAt };
-      }
+      if (name && stars !== undefined && forks !== undefined) repos[name] = { stars, forks };
     }
     url = next;
   }
@@ -109,8 +134,10 @@ export async function collectCrates(fetchImpl: Fetch, config: Config) {
       const version = text(crate, "max_stable_version") ?? text(crate, "max_version");
       const downloads = count(crate, "downloads");
       const recentDownloads = count(crate, "recent_downloads") ?? 0;
-      if (id && version && downloads !== undefined) {
-        crates[id] = { version, downloads, recentDownloads };
+      const publishedAt = text(crate, "updated_at");
+      const repo = repoOf(crate.repository, config.githubOrg);
+      if (id && version && downloads !== undefined && publishedAt) {
+        crates[id] = { version, downloads, recentDownloads, publishedAt, ...(repo ? { repo } : {}) };
       }
     }
     if (list.length < 100) break;
@@ -130,8 +157,16 @@ export async function collectNpm(fetchImpl: Fetch, config: Config) {
     const name = text(entry.package, "name");
     const version = text(entry.package, "version");
     const monthlyDownloads = isRecord(entry.downloads) ? count(entry.downloads, "monthly") : 0;
-    if (name && version && !PLATFORM_BINARY.test(name)) {
-      packages[name] = { version, monthlyDownloads: monthlyDownloads ?? 0 };
+    const publishedAt = text(entry.package, "date");
+    const links = isRecord(entry.package.links) ? entry.package.links : {};
+    const repo = repoOf(links.repository, config.githubOrg);
+    if (name && version && publishedAt && !PLATFORM_BINARY.test(name)) {
+      packages[name] = {
+        version,
+        monthlyDownloads: monthlyDownloads ?? 0,
+        publishedAt,
+        ...(repo ? { repo } : {}),
+      };
     }
   }
   return packages;

@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { collectMetrics, type Config, metricsResponse } from "../src/collect.ts";
+import { collectMetrics, type Config, metricsResponse, repoOf } from "../src/collect.ts";
 
 const config: Config = {
   githubOrg: "sebastian-software",
+  githubTopic: "oss-project",
   cratesUserId: "385008",
   npmMaintainer: "swernerx",
   userAgent: "oss-metrics test",
@@ -20,21 +21,53 @@ function upstream(overrides: Partial<Record<"github" | "github2" | "crates" | "n
     github: () =>
       json(
         [
-          { name: "ferroni", stargazers_count: 7, forks_count: 1, pushed_at: "2026-09-20T10:00:00Z" },
-          { name: "old-thing", archived: true, stargazers_count: 99, forks_count: 0, pushed_at: "2019-01-01T00:00:00Z" },
-          { name: "a-fork", fork: true, stargazers_count: 3, forks_count: 0, pushed_at: "2026-01-01T00:00:00Z" },
+          { name: "ferroni", topics: ["managed-deps", "oss-project"], stargazers_count: 7, forks_count: 1 },
+          { name: "homebrew-tap", topics: [], stargazers_count: 0, forks_count: 0 },
+          { name: "old-thing", archived: true, topics: ["oss-project"], stargazers_count: 99, forks_count: 0 },
+          { name: "a-fork", fork: true, topics: ["oss-project"], stargazers_count: 3, forks_count: 0 },
         ],
         { link: '<https://api.github.com/organizations/1/repos?page=2>; rel="next"' },
       ),
-    github2: () => json([{ name: "ferromark", stargazers_count: 8, forks_count: 0, pushed_at: "2026-09-22T10:00:00Z" }]),
+    github2: () => json([{ name: "ferromark", topics: ["oss-project"], stargazers_count: 8, forks_count: 0 }]),
     crates: () =>
-      json({ crates: [{ id: "ferroni", max_stable_version: "1.4.2", max_version: "1.4.2", downloads: 1746, recent_downloads: 1300 }] }),
+      json({
+        crates: [
+          {
+            id: "ferroni",
+            max_stable_version: "1.4.2",
+            max_version: "1.4.2",
+            downloads: 1746,
+            recent_downloads: 1300,
+            updated_at: "2026-09-23T08:00:00Z",
+            repository: "https://github.com/sebastian-software/ferroni",
+          },
+        ],
+      }),
     npm: () =>
       json({
         objects: [
-          { package: { name: "@palamedes/cli", version: "1.25.0" }, downloads: { monthly: 120, weekly: 30 } },
-          { package: { name: "@palamedes/cli-linux-x64-gnu", version: "1.25.0" }, downloads: { monthly: 90 } },
-          { package: { name: "ferromark", version: "2.1.1" }, downloads: { monthly: 304 } },
+          {
+            package: {
+              name: "@palamedes/cli",
+              version: "1.25.0",
+              date: "2026-09-09T12:00:00Z",
+              links: { repository: "git+https://github.com/sebastian-software/palamedes.git" },
+            },
+            downloads: { monthly: 120, weekly: 30 },
+          },
+          {
+            package: { name: "@palamedes/cli-linux-x64-gnu", version: "1.25.0", date: "2026-09-09T12:00:00Z" },
+            downloads: { monthly: 90 },
+          },
+          {
+            package: {
+              name: "ferromark",
+              version: "2.1.1",
+              date: "2026-09-23T09:00:00Z",
+              links: { repository: "https://github.com/someone-else/ferromark" },
+            },
+            downloads: { monthly: 304 },
+          },
         ],
       }),
     ...overrides,
@@ -56,10 +89,26 @@ test("one document for the whole organization, from one request per source (plus
 
   assert.equal(metrics.generatedAt, "2026-09-24T10:00:00Z");
   assert.deepEqual(metrics.sources, { github: "ok", crates: "ok", npm: "ok" });
-  assert.deepEqual(Object.keys(metrics.github).sort(), ["ferromark", "ferroni"], "archived and forks drop out");
-  assert.deepEqual(metrics.github.ferroni, { stars: 7, forks: 1, pushedAt: "2026-09-20T10:00:00Z" });
-  assert.deepEqual(metrics.crates.ferroni, { version: "1.4.2", downloads: 1746, recentDownloads: 1300 });
-  assert.deepEqual(metrics.npm["@palamedes/cli"], { version: "1.25.0", monthlyDownloads: 120 });
+  assert.deepEqual(
+    Object.keys(metrics.github).sort(),
+    ["ferromark", "ferroni"],
+    "only opted-in repositories; archived and forks drop out even when tagged",
+  );
+  assert.deepEqual(metrics.github.ferroni, { stars: 7, forks: 1 });
+  assert.deepEqual(metrics.crates.ferroni, {
+    version: "1.4.2",
+    downloads: 1746,
+    recentDownloads: 1300,
+    publishedAt: "2026-09-23T08:00:00Z",
+    repo: "ferroni",
+  });
+  assert.deepEqual(metrics.npm["@palamedes/cli"], {
+    version: "1.25.0",
+    monthlyDownloads: 120,
+    publishedAt: "2026-09-09T12:00:00Z",
+    repo: "palamedes",
+  });
+  assert.equal(metrics.npm.ferromark?.repo, undefined, "a repository outside the org is not linked");
   assert.equal(metrics.npm["@palamedes/cli-linux-x64-gnu"], undefined, "platform binaries are not projects");
   assert.equal(calls.length, 4, "github (2 pages), crates, npm");
   assert.ok(calls.every((call) => call.headers["user-agent"] === "oss-metrics test"), "every call identifies itself");
@@ -101,4 +150,13 @@ test("a healthy document is cached an hour at the edge, five minutes in the brow
   const response = metricsResponse(await collectMetrics(fetchImpl, config));
   assert.equal(response.headers.get("cache-control"), "public, max-age=300, s-maxage=3600");
   assert.equal(response.headers.get("content-type"), "application/json; charset=utf-8");
+});
+
+test("repository links resolve to the org's repositories only", () => {
+  const org = "sebastian-software";
+  assert.equal(repoOf("git+https://github.com/sebastian-software/palamedes.git", org), "palamedes");
+  assert.equal(repoOf("https://github.com/sebastian-software/ferroni/tree/main/crates", org), "ferroni");
+  assert.equal(repoOf("git@github.com:sebastian-software/mdtheme.git", org), "mdtheme");
+  assert.equal(repoOf("https://github.com/sebastian-softwarex/ferroni", org), undefined);
+  assert.equal(repoOf(undefined, org), undefined);
 });

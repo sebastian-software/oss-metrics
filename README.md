@@ -17,15 +17,33 @@ the traffic, each identified by a User-Agent as crates.io asks.
   "schema": 1,
   "generatedAt": "2026-09-24T10:00:00Z",
   "sources": { "github": "ok", "crates": "ok", "npm": "ok" },
-  "github": { "ferroni": { "stars": 7, "forks": 1, "pushedAt": "2026-09-20T10:00:00Z" } },
-  "crates": { "ferroni": { "version": "1.4.2", "downloads": 1746, "recentDownloads": 1300 } },
-  "npm": { "@palamedes/cli": { "version": "1.25.0", "monthlyDownloads": 120 } }
+  "github": { "ferroni": { "stars": 7, "forks": 1 } },
+  "crates": {
+    "ferroni": {
+      "version": "1.4.2",
+      "downloads": 1746,
+      "recentDownloads": 1300,
+      "publishedAt": "2026-09-23T08:00:00Z",
+      "repo": "ferroni"
+    }
+  },
+  "npm": {
+    "@palamedes/cli": {
+      "version": "1.25.0",
+      "monthlyDownloads": 120,
+      "publishedAt": "2026-09-09T12:00:00Z",
+      "repo": "palamedes"
+    }
+  }
 }
 ```
 
 - **What is listed:** public, non-archived, non-fork repositories of the GitHub
-  organization; every crate of the crates.io owner; every npm package of the
-  maintainer except per-platform binaries (`…-linux-x64-gnu` and friends).
+  organization that carry the **`oss-project` topic** (opt-in, see below);
+  every crate of the crates.io owner; every npm package of the maintainer except
+  per-platform binaries (`…-linux-x64-gnu` and friends). Packages carry
+  `publishedAt` (their latest publish) and `repo` when their metadata links to
+  an organization repository — join them to `github` through it.
   Ownership is implicit — each source is queried _by owner_, so a look-alike
   package somebody else published never appears.
 - **Three upstream requests** per refresh (GitHub pages add one each per 100
@@ -37,8 +55,23 @@ the traffic, each identified by a User-Agent as crates.io asks.
   When nothing answers: `502`, not cached.
 - **Caching:** `Cache-Control: public, max-age=300, s-maxage=3600`, plus the pull
   zone rules below. CORS is open (`Access-Control-Allow-Origin: *`).
-- **Size:** about 12 KB, 2.4 KB gzipped (62 repositories, 18 crates, 92 npm
-  packages, 2026-09-24).
+- **Size:** about 15 KB, 3 KB gzipped (28 projects, 18 crates, 92 npm packages,
+  2026-09-24).
+
+## Which repositories are projects
+
+A repository is a project when it carries the GitHub topic `oss-project` —
+set it in the repository's About box, no change here needed. The initial set
+was every repository that released something in the six months before
+2026-09-24 (a GitHub release, or a crates.io / npm publish linked to it):
+
+```sh
+GITHUB_TOKEN=$(gh auth token) node scripts/tag-active-repos.ts           # dry run
+GITHUB_TOKEN=$(gh auth token) node scripts/tag-active-repos.ts --apply   # add the topic
+```
+
+The script only adds the topic, never removes it; a project that goes dormant
+loses it by hand.
 - `schema` changes only with a breaking change to the document's shape.
 
 ## Develop
@@ -58,8 +91,8 @@ the Bunny SDK kept external (the edge runtime provides it).
 
 1. **Bunny:** create a standalone Edge Script (this creates its pull zone).
 2. **Environment** (Script → Env Configuration): optional `GITHUB_ORG`,
-   `CRATES_USER_ID`, `NPM_MAINTAINER` (defaults: `sebastian-software`, `385008`,
-   `swernerx`); **secret** `GITHUB_TOKEN` — a fine-grained token with public
+   `GITHUB_TOPIC`, `CRATES_USER_ID`, `NPM_MAINTAINER` (defaults:
+   `sebastian-software`, `oss-project`, `385008`, `swernerx`); **secret** `GITHUB_TOKEN` — a fine-grained token with public
    read access only, which lifts GitHub's limit from 60 to 5,000 requests an hour.
 3. **Pull zone:** Caching → Vary Cache → _URL Query String_ off (the endpoint takes
    none); Edge Rule _Override Cache Time_ = 3600 on `/v1/*`; enable _Origin Shield_
