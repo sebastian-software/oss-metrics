@@ -1,7 +1,7 @@
 # oss-metrics
 
-Live public metrics for every Sebastian Software project — GitHub stars,
-crates.io and npm versions and downloads — as **one small JSON document**,
+Live public metrics for every Sebastian Software project — GitHub stars and
+latest releases, crates.io and npm versions and downloads — as **one small JSON document**,
 served from a Bunny edge script and cached at the edge for an hour.
 
 Sites read one URL instead of calling GitHub, crates.io and npm from every
@@ -16,8 +16,14 @@ the traffic, each identified by a User-Agent as crates.io asks.
 {
   "schema": 1,
   "generatedAt": "2026-09-24T10:00:00Z",
-  "sources": { "github": "ok", "crates": "ok", "npm": "ok" },
-  "github": { "ferroni": { "stars": 7, "forks": 1 } },
+  "sources": { "github": "ok", "releases": "ok", "crates": "ok", "npm": "ok" },
+  "github": {
+    "ferroni": {
+      "stars": 7,
+      "forks": 1,
+      "release": { "tag": "v1.5.1", "version": "1.5.1", "publishedAt": "2026-09-24T19:11:06Z" }
+    }
+  },
   "crates": {
     "ferroni": {
       "version": "1.4.2",
@@ -46,10 +52,17 @@ the traffic, each identified by a User-Agent as crates.io asks.
   an organization repository — join them to `github` through it.
   Ownership is implicit — each source is queried _by owner_, so a look-alike
   package somebody else published never appears.
-- **Three upstream requests** per refresh (GitHub pages add one each per 100
-  repositories): GitHub `orgs/{org}/repos`, crates.io `crates?user_id=`, npm
+- **Four upstream requests** per refresh (GitHub pages add one each per 100
+  repositories): GitHub `orgs/{org}/repos`, one GitHub GraphQL query for every
+  repository's latest release, crates.io `crates?user_id=`, npm
   `-/v1/search?text=maintainer:`. The npm search carries versions and monthly
   downloads for scoped packages too.
+- **Releases:** `github.<repo>.release` is the release GitHub marks "Latest"
+  (no drafts, no prereleases), with `version` taken from the tag (`v0.3.0` and
+  `ferrolex-v0.4.0` both give the plain version; a tag without semver is left
+  out). It is the only version a Git-only tool has. GitHub's GraphQL API needs a
+  token: without `GITHUB_TOKEN` the source reports `"skipped"` and the rest of
+  the document is unaffected.
 - **A failing source** is reported in `sources` with an empty map; the others
   still answer, and the document is cached for five minutes instead of an hour.
   When nothing answers: `502`, not cached.

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { collectMetrics, type Config, metricsResponse, repoOf } from "../src/collect.ts";
+import { collectMetrics, type Config, metricsResponse, repoOf, versionOfTag } from "../src/collect.ts";
 
 const config: Config = {
   githubOrg: "sebastian-software",
@@ -16,7 +16,9 @@ const json = (body: unknown, headers: Record<string, string> = {}) =>
   new Response(JSON.stringify(body), { headers: { "content-type": "application/json", ...headers } });
 
 /** A fake upstream: one answer per source, recording every request it saw. */
-function upstream(overrides: Partial<Record<"github" | "github2" | "crates" | "npm", () => Response>> = {}) {
+function upstream(
+  overrides: Partial<Record<"github" | "github2" | "releases" | "crates" | "npm", () => Response>> = {},
+) {
   const calls: { url: string; headers: Record<string, string> }[] = [];
   const answers = {
     github: () =>
@@ -31,6 +33,22 @@ function upstream(overrides: Partial<Record<"github" | "github2" | "crates" | "n
         { link: '<https://api.github.com/organizations/1/repos?page=2>; rel="next"' },
       ),
     github2: () => json([{ name: "ferromark", topics: ["oss-project"], stargazers_count: 8, forks_count: 0 }]),
+    releases: () =>
+      json({
+        data: {
+          organization: {
+            repositories: {
+              pageInfo: { hasNextPage: false, endCursor: null },
+              nodes: [
+                { name: "ferroni", latestRelease: { tagName: "v1.5.1", publishedAt: "2026-09-24T09:00:00Z" } },
+                { name: "ferromark", latestRelease: { tagName: "nightly", publishedAt: "2026-09-24T09:00:00Z" } },
+                { name: "homebrew-tap", latestRelease: { tagName: "v9.9.9", publishedAt: "2026-09-24T09:00:00Z" } },
+                { name: "a-fork", latestRelease: null },
+              ],
+            },
+          },
+        },
+      }),
     crates: () =>
       json({
         crates: [
@@ -76,6 +94,7 @@ function upstream(overrides: Partial<Record<"github" | "github2" | "crates" | "n
   };
   const fetchImpl = async (url: string, init?: RequestInit) => {
     calls.push({ url, headers: (init?.headers ?? {}) as Record<string, string> });
+    if (url === "https://api.github.com/graphql") return answers.releases();
     if (url.includes("page=2") && url.includes("github")) return answers.github2();
     if (url.startsWith("https://api.github.com/")) return answers.github();
     if (url.startsWith("https://crates.io/")) return answers.crates();
@@ -90,7 +109,7 @@ test("one document for the whole organization, from one request per source (plus
   const metrics = await collectMetrics(fetchImpl, config, new Date("2026-09-24T10:00:00.123Z"));
 
   assert.equal(metrics.generatedAt, "2026-09-24T10:00:00Z");
-  assert.deepEqual(metrics.sources, { github: "ok", crates: "ok", npm: "ok" });
+  assert.deepEqual(metrics.sources, { github: "ok", releases: "skipped", crates: "ok", npm: "ok" });
   assert.deepEqual(
     Object.keys(metrics.github).sort(),
     ["ferromark", "ferroni"],
@@ -161,4 +180,36 @@ test("repository links resolve to the org's repositories only", () => {
   assert.equal(repoOf("git@github.com:sebastian-software/mdtheme.git", org), "mdtheme");
   assert.equal(repoOf("https://github.com/sebastian-softwarex/ferroni", org), undefined);
   assert.equal(repoOf(undefined, org), undefined);
+});
+
+test("with a token, each listed repository carries its latest release, in one GraphQL request", async () => {
+  const { calls, fetchImpl } = upstream();
+  const metrics = await collectMetrics(fetchImpl, { ...config, githubToken: "secret" });
+  assert.equal(metrics.sources.releases, "ok");
+  assert.deepEqual(metrics.github.ferroni?.release, {
+    tag: "v1.5.1",
+    version: "1.5.1",
+    publishedAt: "2026-09-24T09:00:00Z",
+  });
+  assert.equal(metrics.github.ferromark?.release, undefined, "a tag without semver is no version");
+  assert.equal(metrics.github["homebrew-tap"], undefined, "releases never add a repository the topic left out");
+  assert.equal(calls.filter((call) => call.url.endsWith("/graphql")).length, 1);
+});
+
+test("a failing release lookup is reported without costing the stars", async () => {
+  const { fetchImpl } = upstream({ releases: () => new Response("bad credentials", { status: 401 }) });
+  const metrics = await collectMetrics(fetchImpl, { ...config, githubToken: "wrong" });
+  assert.equal(metrics.sources.releases, "error");
+  assert.equal(metrics.sources.github, "ok");
+  assert.deepEqual(metrics.github.ferroni, { stars: 7, forks: 1 });
+  assert.equal(metricsResponse(metrics).headers.get("cache-control"), "public, max-age=60, s-maxage=300");
+});
+
+test("release tags of every shape give their plain version", () => {
+  assert.equal(versionOfTag("v0.3.0"), "0.3.0");
+  assert.equal(versionOfTag("ferrolex-v0.4.0"), "0.4.0");
+  assert.equal(versionOfTag("ferrugo-v0.5.0"), "0.5.0");
+  assert.equal(versionOfTag("v2.0.0-rc.2"), "2.0.0-rc.2");
+  assert.equal(versionOfTag("1.0.0"), "1.0.0");
+  assert.equal(versionOfTag("nightly"), undefined);
 });
