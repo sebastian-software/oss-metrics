@@ -17,6 +17,8 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      BUNNY_CONFIGURED: ${{ secrets.SCRIPT_ID != '' && secrets.DEPLOY_KEY != '' }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
@@ -28,7 +30,9 @@ jobs:
           cache: "pnpm"
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
+      # Skipped until the Bunny secrets exist, so pushes before the setup stay green.
       - name: Deploy the bundled script
+        if: env.BUNNY_CONFIGURED == 'true'
         uses: BunnyWay/actions/deploy-script@4b22fe0b319386b3913117daf97729409dd0a6ef # main, 2026-08-25
         with:
           script_id: ${{ secrets.SCRIPT_ID }}
