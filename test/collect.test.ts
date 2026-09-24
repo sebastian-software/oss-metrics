@@ -6,6 +6,7 @@ import { collectMetrics, type Config, metricsResponse, repoOf } from "../src/col
 const config: Config = {
   githubOrg: "sebastian-software",
   githubTopic: "oss-project",
+  githubExcludeTopic: "oss-exclude",
   cratesUserId: "385008",
   npmMaintainer: "swernerx",
   userAgent: "oss-metrics test",
@@ -23,6 +24,7 @@ function upstream(overrides: Partial<Record<"github" | "github2" | "crates" | "n
         [
           { name: "ferroni", topics: ["managed-deps", "oss-project"], stargazers_count: 7, forks_count: 1 },
           { name: "homebrew-tap", topics: [], stargazers_count: 0, forks_count: 0 },
+          { name: "standards", topics: ["oss-project", "oss-exclude"], stargazers_count: 2, forks_count: 0 },
           { name: "old-thing", archived: true, topics: ["oss-project"], stargazers_count: 99, forks_count: 0 },
           { name: "a-fork", fork: true, topics: ["oss-project"], stargazers_count: 3, forks_count: 0 },
         ],
@@ -92,7 +94,7 @@ test("one document for the whole organization, from one request per source (plus
   assert.deepEqual(
     Object.keys(metrics.github).sort(),
     ["ferromark", "ferroni"],
-    "only opted-in repositories; archived and forks drop out even when tagged",
+    "only opted-in repositories; blocked, archived and forks drop out even when tagged",
   );
   assert.deepEqual(metrics.github.ferroni, { stars: 7, forks: 1 });
   assert.deepEqual(metrics.crates.ferroni, {

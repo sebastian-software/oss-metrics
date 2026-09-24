@@ -7,7 +7,10 @@
  *   GITHUB_TOKEN=$(gh auth token) node scripts/tag-active-repos.ts           # dry run
  *   GITHUB_TOKEN=$(gh auth token) node scripts/tag-active-repos.ts --apply   # write topics
  *
- * Options: --months=6, --topic=oss-project
+ * A repository carrying the blocker topic (`oss-exclude`) is never tagged: the
+ * decision "releases, but is not a project" lives on the repository itself.
+ *
+ * Options: --months=6, --topic=oss-project, --blocker=oss-exclude
  */
 import { repoOf as repoIn } from "../src/collect.ts";
 
@@ -16,17 +19,13 @@ const CRATES_USER_ID = "385008";
 const NPM_MAINTAINER = "swernerx";
 const UA = "oss-metrics topic tagger (https://github.com/sebastian-software/oss-metrics)";
 
-/**
- * Repositories that release but are tooling, not projects — decided by hand
- * (2026-09-24). The tagger never adds the topic to them.
- */
-const EXCLUDED = new Set(["project-infra", "standards"]);
 
 const argument = (name: string, fallback: string) =>
   process.argv.find((value) => value.startsWith(`--${name}=`))?.split("=")[1] ?? fallback;
 const apply = process.argv.includes("--apply");
 const months = Number(argument("months", "6"));
 const topic = argument("topic", "oss-project");
+const blocker = argument("blocker", "oss-exclude");
 const token = process.env.GITHUB_TOKEN;
 if (!token) throw new Error("GITHUB_TOKEN is required (e.g. GITHUB_TOKEN=$(gh auth token))");
 
@@ -59,7 +58,7 @@ async function listRepos(): Promise<Repo[]> {
     repos.push(...batch);
     if (batch.length < 100) break;
   }
-  return repos.filter((repo) => !repo.archived && !repo.fork && !EXCLUDED.has(repo.name));
+  return repos.filter((repo) => !repo.archived && !repo.fork && !repo.topics.includes(blocker));
 }
 
 async function latestGithubRelease(repo: string): Promise<string | undefined> {

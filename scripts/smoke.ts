@@ -11,6 +11,7 @@ import { collectMetrics, metricsResponse } from "../src/collect.ts";
 const metrics = await collectMetrics(fetch, {
   githubOrg: "sebastian-software",
   githubTopic: "oss-project",
+  githubExcludeTopic: "oss-exclude",
   githubToken: process.env.GITHUB_TOKEN,
   cratesUserId: "385008",
   npmMaintainer: "swernerx",

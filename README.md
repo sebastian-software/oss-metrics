@@ -71,8 +71,10 @@ GITHUB_TOKEN=$(gh auth token) node scripts/tag-active-repos.ts --apply   # add t
 ```
 
 The script only adds the topic, never removes it; a project that goes dormant
-loses it by hand. Tooling that releases but is not a project (`standards`,
-`project-infra`) is excluded in the script.
+loses it by hand. A repository that releases but is not a project (tooling such
+as `standards`, `project-infra`) carries the blocker topic **`oss-exclude`**:
+the tagger skips it, and the service never lists it, even if it also carries
+`oss-project`.
 - `schema` changes only with a breaking change to the document's shape.
 
 ## Develop
@@ -92,8 +94,9 @@ the Bunny SDK kept external (the edge runtime provides it).
 
 1. **Bunny:** create a standalone Edge Script (this creates its pull zone).
 2. **Environment** (Script → Env Configuration): optional `GITHUB_ORG`,
-   `GITHUB_TOPIC`, `CRATES_USER_ID`, `NPM_MAINTAINER` (defaults:
-   `sebastian-software`, `oss-project`, `385008`, `swernerx`); **secret** `GITHUB_TOKEN` — a fine-grained token with public
+   `GITHUB_TOPIC`, `GITHUB_EXCLUDE_TOPIC`, `CRATES_USER_ID`, `NPM_MAINTAINER`
+   (defaults: `sebastian-software`, `oss-project`, `oss-exclude`, `385008`,
+   `swernerx`); **secret** `GITHUB_TOKEN` — a fine-grained token with public
    read access only, which lifts GitHub's limit from 60 to 5,000 requests an hour.
 3. **Pull zone:** Caching → Vary Cache → _URL Query String_ off (the endpoint takes
    none); Edge Rule _Override Cache Time_ = 3600 on `/v1/*`; enable _Origin Shield_

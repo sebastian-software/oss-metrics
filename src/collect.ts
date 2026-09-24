@@ -18,6 +18,8 @@ export type Config = {
    * without a list in code. `scripts/tag-active-repos.ts` applies it.
    */
   githubTopic: string;
+  /** The blocker topic: a repository carrying it is never listed, even with `githubTopic`. */
+  githubExcludeTopic: string;
   /** Optional token: raises GitHub's limit from 60 to 5,000 requests an hour. */
   githubToken?: string;
   /** Numeric crates.io user id whose crates are listed (swernerx: 385008). */
@@ -110,7 +112,7 @@ export async function collectGithub(fetchImpl: Fetch, config: Config) {
     for (const repo of Array.isArray(body) ? (body as unknown[]) : []) {
       if (!isRecord(repo) || repo.archived === true || repo.fork === true) continue;
       const topics = Array.isArray(repo.topics) ? repo.topics : [];
-      if (!topics.includes(config.githubTopic)) continue;
+      if (!topics.includes(config.githubTopic) || topics.includes(config.githubExcludeTopic)) continue;
       const name = text(repo, "name");
       const stars = count(repo, "stargazers_count");
       const forks = count(repo, "forks_count");
