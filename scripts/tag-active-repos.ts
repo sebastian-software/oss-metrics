@@ -16,6 +16,12 @@ const CRATES_USER_ID = "385008";
 const NPM_MAINTAINER = "swernerx";
 const UA = "oss-metrics topic tagger (https://github.com/sebastian-software/oss-metrics)";
 
+/**
+ * Repositories that release but are tooling, not projects — decided by hand
+ * (2026-09-24). The tagger never adds the topic to them.
+ */
+const EXCLUDED = new Set(["project-infra", "standards"]);
+
 const argument = (name: string, fallback: string) =>
   process.argv.find((value) => value.startsWith(`--${name}=`))?.split("=")[1] ?? fallback;
 const apply = process.argv.includes("--apply");
@@ -53,7 +59,7 @@ async function listRepos(): Promise<Repo[]> {
     repos.push(...batch);
     if (batch.length < 100) break;
   }
-  return repos.filter((repo) => !repo.archived && !repo.fork);
+  return repos.filter((repo) => !repo.archived && !repo.fork && !EXCLUDED.has(repo.name));
 }
 
 async function latestGithubRelease(repo: string): Promise<string | undefined> {

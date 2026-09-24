@@ -71,7 +71,8 @@ GITHUB_TOKEN=$(gh auth token) node scripts/tag-active-repos.ts --apply   # add t
 ```
 
 The script only adds the topic, never removes it; a project that goes dormant
-loses it by hand.
+loses it by hand. Tooling that releases but is not a project (`standards`,
+`project-infra`) is excluded in the script.
 - `schema` changes only with a breaking change to the document's shape.
 
 ## Develop
