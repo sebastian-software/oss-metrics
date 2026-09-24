@@ -175,7 +175,10 @@ export async function provision(
   return {
     scriptId: script.Id,
     pullZoneId: linked.Id,
-    pullZoneHost: linked.DefaultHostname ?? `${linked.PullZoneName}.b-cdn.net`,
+    // DefaultHostname is a full https://…bunny.run URL in the live API.
+    // Outputs are bare CDN hostnames: the workflow adds https:// itself and
+    // operators also use this value as the DNS CNAME target.
+    pullZoneHost: `${linked.PullZoneName}.b-cdn.net`,
     customHostReady,
     changes,
   };
@@ -183,7 +186,9 @@ export async function provision(
 
 if (import.meta.main) {
   const api = bunnyApi(required("BUNNY_API_KEY"));
-  const result = await provision(api, DESIRED, { GITHUB_TOKEN: required("METRICS_GITHUB_TOKEN") });
+  const token = process.env.METRICS_GITHUB_TOKEN;
+  if (!token) console.log("::notice::METRICS_GITHUB_TOKEN is not set; GitHub uses the public unauthenticated rate limit.");
+  const result = await provision(api, DESIRED, token ? { GITHUB_TOKEN: token } : {});
   console.log(result.changes.length > 0 ? result.changes.map((change) => `- ${change}`).join("\n") : "no changes");
   await setOutputs({
     script_id: String(result.scriptId),

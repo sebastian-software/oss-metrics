@@ -98,12 +98,13 @@ Everything on Bunny is code in this repository and converges on every push to
 1. `pnpm check` — typecheck, tests, bundle.
 2. `scripts/provision.ts` — finds or creates the edge script `oss-metrics` with
    its pull zone `sebastian-oss-metrics`; sets the script's variables and its
-   `GITHUB_TOKEN` secret; pull zone caching (query strings ignored, Origin
+   optional `GITHUB_TOKEN` secret; pull zone caching (query strings ignored, Origin
    Shield, request coalescing, stale-while-updating); the edge rule that caches
    `/v1/` for an hour; the hostname `metrics.sebastian-software.com` with its free
    certificate and forced HTTPS. Stateless and idempotent: resources are looked
    up by name, settings written only when they differ — a second run changes
-   nothing. The desired state is the `DESIRED` object at the top of the script.
+   no infrastructure settings. Variables and secrets are idempotent upserts on
+   every run. The desired state is the `DESIRED` object at the top of the script.
 3. `scripts/publish.ts` — uploads `dist/script.js`, publishes it as a release
    (noted with the commit), purges the pull zone.
 4. `scripts/verify.ts` — smoke check against the `b-cdn.net` host (and the custom
@@ -111,21 +112,53 @@ Everything on Bunny is code in this repository and converges on every push to
    source `ok`, and a repeat request served from the cache (`CDN-Cache: HIT`).
    A failed check fails the workflow.
 
-### By hand, once
+### Deployment credentials (Limen / SOPS)
 
-1. A Bunny account with billing, and its **API key**.
-2. GitHub → Settings → Environments → **`production`** (restrict it to `main`),
-   with the secrets `BUNNY_API_KEY` and `METRICS_GITHUB_TOKEN` (a fine-grained
-   token with public read access only; it lifts GitHub's limit from 60 to 5,000
-   requests an hour).
-3. Run the workflow once; its summary prints the CNAME target. Point
-   `metrics.sebastian-software.com` at it (`CNAME sebastian-oss-metrics.b-cdn.net`).
-4. Run the workflow again after DNS has propagated: the certificate is issued
-   and HTTPS forced. Until then the run passes with a warning.
+The workflow decrypts `.limen/production/.env.production.local.sops.env` through
+Limen using GitHub OIDC. `.limen.yaml` maps it to the ignored
+`.env.production.local`; that file is restricted to mode `0600`, its credentials
+are masked before use, and the workflow removes it on completion. Only
+`BUNNY_API_KEY` and the optional `METRICS_GITHUB_TOKEN` are imported.
 
-Without `BUNNY_API_KEY` the rollout is skipped and the workflow stays green.
-Locally: `BUNNY_API_KEY=… METRICS_GITHUB_TOKEN=… pnpm provision`, and
-`pnpm verify https://sebastian-oss-metrics.b-cdn.net`.
+- `BUNNY_API_KEY` is the account key used for provisioning and publishing.
+- `METRICS_GITHUB_TOKEN` may be a fine-grained, public-read-only token to increase
+  the GitHub API rate limit. Without it, the service uses public unauthenticated
+  requests. Origin Shield and CDN caching reduce upstream traffic. Do not put a
+  short-lived Actions `GITHUB_TOKEN` into the edge script: it expires when the
+  workflow finishes.
+- The only GitHub secret needed is the existing organization secret
+  `LIMEN_INSTALL_TOKEN`, with repository access granted to `oss-metrics`. It
+  downloads the private Limen action and CLI. The public workflow checks out the
+  action at a pinned commit rather than using a private action directly.
+- Limen's allowlist is restricted to `sebastian-software/oss-metrics`,
+  `refs/heads/main`, the `deploy.yml` workflow on `main`, and the GitHub
+  Environment `production`. The Environment allows only the `main` branch.
+
+A missing install token, a denied OIDC request, or a missing Bunny credential
+fails the deployment. It is never reported as a successful skipped rollout.
+
+For local deployment or credential updates, install Limen and SOPS, then:
+
+```sh
+limen login
+limen sync                   # also registers local merge/diff drivers
+limen decrypt --env production
+node --env-file=.env.production.local scripts/provision.ts
+# Edit the encrypted file through Limen; never commit plaintext.
+limen edit .limen/production/.env.production.local.sops.env
+limen sync --check
+```
+
+The DNS record is `metrics.sebastian-software.com CNAME
+sebastian-oss-metrics.b-cdn.net` (TTL 300). The provisioner retries certificate
+issuance after DNS propagation and then forces HTTPS. Bunny's script API returns
+its default `bunny.run` address as a complete URL; workflow outputs deliberately
+use the bare `b-cdn.net` hostname for both verification and the CNAME target.
+
+The initial live rollout verified the SDK import, runtime environment variables,
+integer edge-rule enums, all three data sources, CORS, `CDN-Cache: HIT`, and the
+custom hostname with HTTPS. Re-run the workflow after changing any source or
+hosting configuration; it publishes the bundle and purges the cache.
 
 ## Cost
 

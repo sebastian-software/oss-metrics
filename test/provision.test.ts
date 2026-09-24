@@ -41,7 +41,9 @@ function fakeBunny(options: { dnsReady?: boolean } = {}) {
     if (route === "POST /compute/script") {
       const zoneName = String(payload.LinkedPullZoneName);
       state.pullZone.Name = zoneName;
-      const script = { Id: 42, Name: String(payload.Name), LinkedPullZones: [{ Id: 900, PullZoneName: zoneName }] };
+      const script = { Id: 42, Name: String(payload.Name), LinkedPullZones: [{
+        Id: 900, PullZoneName: zoneName, DefaultHostname: `https://${zoneName}.bunny.run`,
+      }] };
       state.scripts.push(script);
       return script as T;
     }
