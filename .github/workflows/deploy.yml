@@ -1,0 +1,36 @@
+# Deploys the edge script to Bunny on every push to main. Needs two repository
+# secrets from Bunny (Script → Deployments → Settings): SCRIPT_ID, DEPLOY_KEY.
+name: Deploy to Bunny
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          package_json_file: package.json
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "24"
+          cache: "pnpm"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      - name: Deploy the bundled script
+        uses: BunnyWay/actions/deploy-script@4b22fe0b319386b3913117daf97729409dd0a6ef # main, 2026-08-25
+        with:
+          script_id: ${{ secrets.SCRIPT_ID }}
+          deploy_key: ${{ secrets.DEPLOY_KEY }}
+          file: dist/script.js

@@ -1,0 +1,24 @@
+{
+  "name": "oss-metrics",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Live public metrics (stars, versions, downloads) for every Sebastian Software project, as one cached JSON document at the edge",
+  "license": "Apache-2.0",
+  "type": "module",
+  "packageManager": "pnpm@11.10.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "node scripts/build.ts",
+    "test": "node --test test/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "check": "pnpm typecheck && pnpm test && pnpm build",
+    "smoke": "node scripts/smoke.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.9.3"
+  }
+}
