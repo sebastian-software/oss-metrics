@@ -1,0 +1,4 @@
+# limen: sops merge/diff drivers (managed)
+.limen/**/*.sops merge=limen diff=limen
+.limen/**/*.sops.* merge=limen diff=limen
+# limen: end managed block

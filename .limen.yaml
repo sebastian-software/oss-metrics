@@ -1,0 +1,15 @@
+schema_version: 2
+recipients:
+- public_key: age1u6ymux4vjr2zcjxsjt3mrefl98pfhlc83gcwfttk6vgw9l6ry5hqhwsr2p
+  role: service
+  provenance: limen-service-key, VPS limen.int.sebastian-software.de
+  added: 2026-05-29
+- public_key: age1xckx9l96f72d0nall2n3v668yteaschf8l0uwg2hjnd4a5uy9gdsn5pcst
+  role: recovery
+  provenance: limen-recovery-key, USB Set A + B, Sub-Phase G.2 ceremony
+  added: 2026-05-29
+environments:
+  dev: []
+  production:
+  - source: .limen/production/.env.production.local.sops.env
+    target: .env.production.local
