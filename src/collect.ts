@@ -30,7 +30,13 @@ export type Config = {
   userAgent: string;
 };
 
-export type RepoMetrics = { stars: number; forks: number };
+/**
+ * A repository's latest release, as GitHub marks it "Latest" (no drafts, no
+ * prereleases). `version` is the semver inside the tag: `v0.3.0` and
+ * `ferrolex-v0.4.0` both give the plain version.
+ */
+export type ReleaseMetrics = { tag: string; version: string; publishedAt: string };
+export type RepoMetrics = { stars: number; forks: number; release?: ReleaseMetrics };
 /** `repo` names the organization repository the package links to, when it does. */
 export type CrateMetrics = {
   version: string;
@@ -45,12 +51,13 @@ export type PackageMetrics = {
   publishedAt: string;
   repo?: string;
 };
-export type SourceStatus = "error" | "ok";
+/** `skipped`: the source needs a token and none is configured (releases). */
+export type SourceStatus = "error" | "ok" | "skipped";
 
 export type Metrics = {
   schema: 1;
   generatedAt: string;
-  sources: { github: SourceStatus; crates: SourceStatus; npm: SourceStatus };
+  sources: { github: SourceStatus; releases: SourceStatus; crates: SourceStatus; npm: SourceStatus };
   github: Record<string, RepoMetrics>;
   crates: Record<string, CrateMetrics>;
   npm: Record<string, PackageMetrics>;
@@ -123,6 +130,72 @@ export async function collectGithub(fetchImpl: Fetch, config: Config) {
   return repos;
 }
 
+/** "ferrolex-v0.4.0" → "0.4.0"; undefined when the tag carries no semver. */
+export function versionOfTag(tag: string): string | undefined {
+  return /(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/u.exec(tag)?.[1];
+}
+
+const RELEASES_QUERY = `query($org: String!, $cursor: String) {
+  organization(login: $org) {
+    repositories(first: 100, after: $cursor, privacy: PUBLIC) {
+      pageInfo { hasNextPage endCursor }
+      nodes { name latestRelease { tagName publishedAt } }
+    }
+  }
+}`;
+
+/**
+ * The latest release of every public repository of the organization, in one
+ * GraphQL request per 100 repositories. GitHub's GraphQL API needs a token, so
+ * without one this source is skipped rather than failed. A release is the only
+ * version a repository that publishes to no registry has (a Git-only tool).
+ */
+export async function collectReleases(fetchImpl: Fetch, config: Config) {
+  const releases: Record<string, ReleaseMetrics> = {};
+  let cursor: string | null = null;
+  for (let page = 0; page < MAX_PAGES.github; page += 1) {
+    const response = await fetchImpl("https://api.github.com/graphql", {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        authorization: `Bearer ${config.githubToken}`,
+        "content-type": "application/json",
+        "user-agent": config.userAgent,
+      },
+      body: JSON.stringify({ query: RELEASES_QUERY, variables: { org: config.githubOrg, cursor } }),
+    });
+    if (!response.ok) throw new Error(`GitHub GraphQL answered ${response.status}`);
+    const body: unknown = await response.json();
+    const repositories = releasesPage(body);
+    for (const node of repositories.nodes) addRelease(releases, node);
+    if (!repositories.hasNextPage) break;
+    cursor = repositories.endCursor;
+  }
+  return releases;
+}
+
+function releasesPage(body: unknown) {
+  const data = isRecord(body) && isRecord(body.data) ? body.data : undefined;
+  if (data === undefined) throw new Error("GitHub GraphQL answered without data");
+  const organization = isRecord(data.organization) ? data.organization : {};
+  const repositories = isRecord(organization.repositories) ? organization.repositories : {};
+  const pageInfo = isRecord(repositories.pageInfo) ? repositories.pageInfo : {};
+  return {
+    nodes: Array.isArray(repositories.nodes) ? (repositories.nodes as unknown[]) : [],
+    hasNextPage: pageInfo.hasNextPage === true,
+    endCursor: typeof pageInfo.endCursor === "string" ? pageInfo.endCursor : null,
+  };
+}
+
+function addRelease(releases: Record<string, ReleaseMetrics>, node: unknown) {
+  if (!isRecord(node) || !isRecord(node.latestRelease)) return;
+  const name = text(node, "name");
+  const tag = text(node.latestRelease, "tagName");
+  const publishedAt = text(node.latestRelease, "publishedAt");
+  const version = tag === undefined ? undefined : versionOfTag(tag);
+  if (name && tag && version && publishedAt) releases[name] = { tag, version, publishedAt };
+}
+
 export async function collectCrates(fetchImpl: Fetch, config: Config) {
   const headers = { "user-agent": config.userAgent };
   const crates: Record<string, CrateMetrics> = {};
@@ -183,23 +256,38 @@ export async function collectMetrics(
   config: Config,
   now: Date = new Date(),
 ): Promise<Metrics> {
-  const [github, crates, npm] = await Promise.allSettled([
+  const [github, releases, crates, npm] = await Promise.allSettled([
     collectGithub(fetchImpl, config),
+    config.githubToken ? collectReleases(fetchImpl, config) : Promise.resolve(null),
     collectCrates(fetchImpl, config),
     collectNpm(fetchImpl, config),
   ]);
+  const repos = github.status === "fulfilled" ? github.value : {};
+  // Releases join the listed repositories only: the topic filter decides what a project is.
+  if (releases.status === "fulfilled" && releases.value !== null) {
+    for (const [name, repo] of Object.entries(repos)) {
+      const release = releases.value[name];
+      if (release !== undefined) repo.release = release;
+    }
+  }
   return {
     schema: 1,
     generatedAt: `${now.toISOString().slice(0, 19)}Z`,
     sources: {
       github: github.status === "fulfilled" ? "ok" : "error",
+      releases: releaseStatus(releases),
       crates: crates.status === "fulfilled" ? "ok" : "error",
       npm: npm.status === "fulfilled" ? "ok" : "error",
     },
-    github: github.status === "fulfilled" ? github.value : {},
+    github: repos,
     crates: crates.status === "fulfilled" ? crates.value : {},
     npm: npm.status === "fulfilled" ? npm.value : {},
   };
+}
+
+function releaseStatus(result: PromiseSettledResult<Record<string, ReleaseMetrics> | null>): SourceStatus {
+  if (result.status === "rejected") return "error";
+  return result.value === null ? "skipped" : "ok";
 }
 
 /**
@@ -209,7 +297,8 @@ export async function collectMetrics(
  * answered.
  */
 export function metricsResponse(metrics: Metrics): Response {
-  const states = Object.values(metrics.sources);
+  // A skipped source (no token for releases) is configuration, not a failure.
+  const states = Object.values(metrics.sources).filter((state) => state !== "skipped");
   const allFailed = states.every((state) => state === "error");
   const partial = states.includes("error");
   let cacheControl = "public, max-age=300, s-maxage=3600";
