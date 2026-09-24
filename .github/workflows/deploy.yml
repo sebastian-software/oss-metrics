@@ -1,5 +1,10 @@
-# Deploys the edge script to Bunny on every push to main. Needs two repository
-# secrets from Bunny (Script → Deployments → Settings): SCRIPT_ID, DEPLOY_KEY.
+# Provisions the Bunny hosting and rolls out the edge script, on every push to
+# main and on demand. Idempotent: an unchanged account stays unchanged.
+#
+# Needs, in the protected Environment "production":
+#   BUNNY_API_KEY         Bunny account API key
+#   METRICS_GITHUB_TOKEN  fine-grained token, public read only (GitHub rate limit)
+# Until BUNNY_API_KEY exists the rollout is skipped, so pushes stay green.
 name: Deploy to Bunny
 
 on:
@@ -15,10 +20,12 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy:
+  rollout:
     runs-on: ubuntu-latest
+    environment: production
     env:
-      BUNNY_CONFIGURED: ${{ secrets.SCRIPT_ID != '' && secrets.DEPLOY_KEY != '' }}
+      BUNNY_API_KEY: ${{ secrets.BUNNY_API_KEY }}
+      METRICS_GITHUB_TOKEN: ${{ secrets.METRICS_GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
@@ -30,11 +37,35 @@ jobs:
           cache: "pnpm"
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
-      # Skipped until the Bunny secrets exist, so pushes before the setup stay green.
-      - name: Deploy the bundled script
-        if: env.BUNNY_CONFIGURED == 'true'
-        uses: BunnyWay/actions/deploy-script@4b22fe0b319386b3913117daf97729409dd0a6ef # main, 2026-08-25
-        with:
-          script_id: ${{ secrets.SCRIPT_ID }}
-          deploy_key: ${{ secrets.DEPLOY_KEY }}
-          file: dist/script.js
+
+      - name: Skip until Bunny is configured
+        if: env.BUNNY_API_KEY == ''
+        run: echo "::notice::BUNNY_API_KEY is not set in the production environment; skipping the rollout."
+
+      - name: Provision script, pull zone, caching, hostname
+        id: provision
+        if: env.BUNNY_API_KEY != ''
+        run: node scripts/provision.ts
+
+      - name: Publish the bundled script and purge the cache
+        if: env.BUNNY_API_KEY != ''
+        env:
+          SCRIPT_ID: ${{ steps.provision.outputs.script_id }}
+          PULL_ZONE_ID: ${{ steps.provision.outputs.pull_zone_id }}
+        run: node scripts/publish.ts dist/script.js
+
+      - name: Smoke check
+        if: env.BUNNY_API_KEY != ''
+        run: >-
+          node scripts/verify.ts
+          "https://${{ steps.provision.outputs.pull_zone_host }}"
+          ${{ steps.provision.outputs.custom_host_ready == 'true' && 'https://metrics.sebastian-software.com' || '' }}
+
+      - name: Summary
+        if: always() && env.BUNNY_API_KEY != ''
+        run: |
+          {
+            echo "### oss-metrics rollout"
+            echo "- Pull zone host (CNAME target): \`${{ steps.provision.outputs.pull_zone_host }}\`"
+            echo "- Custom hostname ready: \`${{ steps.provision.outputs.custom_host_ready }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

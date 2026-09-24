@@ -90,21 +90,42 @@ edge and under `node --test`. `src/script.ts` is the Bunny entry point;
 `pnpm build` bundles both into the single file the deploy action uploads, with
 the Bunny SDK kept external (the edge runtime provides it).
 
-## Set up (once, by hand)
+## Hosting and rollout
 
-1. **Bunny:** create a standalone Edge Script (this creates its pull zone).
-2. **Environment** (Script → Env Configuration): optional `GITHUB_ORG`,
-   `GITHUB_TOPIC`, `GITHUB_EXCLUDE_TOPIC`, `CRATES_USER_ID`, `NPM_MAINTAINER`
-   (defaults: `sebastian-software`, `oss-project`, `oss-exclude`, `385008`,
-   `swernerx`); **secret** `GITHUB_TOKEN` — a fine-grained token with public
-   read access only, which lifts GitHub's limit from 60 to 5,000 requests an hour.
-3. **Pull zone:** Caching → Vary Cache → _URL Query String_ off (the endpoint takes
-   none); Edge Rule _Override Cache Time_ = 3600 on `/v1/*`; enable _Origin Shield_
-   and _Request Coalescing_.
-4. **Hostname:** add `metrics.sebastian-software.com`, CNAME it to the pull zone's
-   `*.b-cdn.net` host, then _Verify & Activate SSL_.
-5. **GitHub secrets** (Script → Deployments → Settings): `SCRIPT_ID`,
-   `DEPLOY_KEY`. Pushing to `main` then deploys.
+Everything on Bunny is code in this repository and converges on every push to
+`main` (`.github/workflows/deploy.yml`):
+
+1. `pnpm check` — typecheck, tests, bundle.
+2. `scripts/provision.ts` — finds or creates the edge script `oss-metrics` with
+   its pull zone `sebastian-oss-metrics`; sets the script's variables and its
+   `GITHUB_TOKEN` secret; pull zone caching (query strings ignored, Origin
+   Shield, request coalescing, stale-while-updating); the edge rule that caches
+   `/v1/` for an hour; the hostname `metrics.sebastian-software.com` with its free
+   certificate and forced HTTPS. Stateless and idempotent: resources are looked
+   up by name, settings written only when they differ — a second run changes
+   nothing. The desired state is the `DESIRED` object at the top of the script.
+3. `scripts/publish.ts` — uploads `dist/script.js`, publishes it as a release
+   (noted with the commit), purges the pull zone.
+4. `scripts/verify.ts` — smoke check against the `b-cdn.net` host (and the custom
+   hostname once its certificate exists): `200`, CORS open, `schema: 1`, every
+   source `ok`, and a repeat request served from the cache (`CDN-Cache: HIT`).
+   A failed check fails the workflow.
+
+### By hand, once
+
+1. A Bunny account with billing, and its **API key**.
+2. GitHub → Settings → Environments → **`production`** (restrict it to `main`),
+   with the secrets `BUNNY_API_KEY` and `METRICS_GITHUB_TOKEN` (a fine-grained
+   token with public read access only; it lifts GitHub's limit from 60 to 5,000
+   requests an hour).
+3. Run the workflow once; its summary prints the CNAME target. Point
+   `metrics.sebastian-software.com` at it (`CNAME sebastian-oss-metrics.b-cdn.net`).
+4. Run the workflow again after DNS has propagated: the certificate is issued
+   and HTTPS forced. Until then the run passes with a warning.
+
+Without `BUNNY_API_KEY` the rollout is skipped and the workflow stays green.
+Locally: `BUNNY_API_KEY=… METRICS_GITHUB_TOKEN=… pnpm provision`, and
+`pnpm verify https://sebastian-oss-metrics.b-cdn.net`.
 
 ## Cost
 

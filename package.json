@@ -14,7 +14,9 @@
     "test": "node --test test/*.test.ts",
     "typecheck": "tsc --noEmit",
     "check": "pnpm typecheck && pnpm test && pnpm build",
-    "smoke": "node scripts/smoke.ts"
+    "smoke": "node scripts/smoke.ts",
+    "provision": "node scripts/provision.ts",
+    "verify": "node scripts/verify.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
