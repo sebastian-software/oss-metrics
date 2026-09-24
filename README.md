@@ -62,7 +62,10 @@ the traffic, each identified by a User-Agent as crates.io asks.
   `ferrolex-v0.4.0` both give the plain version; a tag without semver is left
   out). It is the only version a Git-only tool has. GitHub's GraphQL API needs a
   token: without `GITHUB_TOKEN` the source reports `"skipped"` and the rest of
-  the document is unaffected.
+  the document is unaffected. Production gets the token from the Limen-encrypted
+  `METRICS_GITHUB_TOKEN` (a fine-grained token with read access to public
+  repositories is enough); the deploy's smoke check passes a skipped source
+  with a notice.
 - **A failing source** is reported in `sources` with an empty map; the others
   still answer, and the document is cached for five minutes instead of an hour.
   When nothing answers: `502`, not cached.
