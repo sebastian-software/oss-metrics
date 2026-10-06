@@ -38,17 +38,8 @@ export type Config = {
  * `ferrolex-v0.4.0` both give the plain version.
  */
 export type ReleaseMetrics = { tag: string; version: string; publishedAt: string };
-/**
- * `archived` repositories are listed so sites can tell "archived" from "not a
- * project"; `pushedAt` is the last push, from which sites derive activity.
- */
-export type RepoMetrics = {
-  stars: number;
-  forks: number;
-  archived: boolean;
-  pushedAt: string;
-  release?: ReleaseMetrics;
-};
+/** `pushedAt` is the repository's last push, from which sites derive activity. */
+export type RepoMetrics = { stars: number; forks: number; pushedAt: string; release?: ReleaseMetrics };
 /** One agent skill: the number of focused references it routes to. */
 export type SkillMetrics = { references: number };
 export type SkillsMetrics = {
@@ -142,7 +133,7 @@ export async function collectGithub(fetchImpl: Fetch, config: Config) {
   for (let page = 0; url !== undefined && page < MAX_PAGES.github; page += 1) {
     const { body, next }: { body: unknown; next?: string } = await getJson(fetchImpl, url, headers);
     for (const repo of Array.isArray(body) ? (body as unknown[]) : []) {
-      if (!isRecord(repo) || repo.fork === true) continue;
+      if (!isRecord(repo) || repo.archived === true || repo.fork === true) continue;
       const topics = Array.isArray(repo.topics) ? repo.topics : [];
       if (!topics.includes(config.githubTopic) || topics.includes(config.githubExcludeTopic)) continue;
       const name = text(repo, "name");
@@ -150,7 +141,7 @@ export async function collectGithub(fetchImpl: Fetch, config: Config) {
       const forks = count(repo, "forks_count");
       const pushedAt = text(repo, "pushed_at");
       if (name && stars !== undefined && forks !== undefined && pushedAt) {
-        repos[name] = { stars, forks, archived: repo.archived === true, pushedAt };
+        repos[name] = { stars, forks, pushedAt };
       }
     }
     url = next;

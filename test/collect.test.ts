@@ -146,11 +146,10 @@ test("one document for the whole organization, from one request per source (plus
   assert.deepEqual(metrics.sources, { github: "ok", releases: "skipped", crates: "ok", npm: "ok", skills: "ok" });
   assert.deepEqual(
     Object.keys(metrics.github).sort(),
-    ["ferromark", "ferroni", "old-thing"],
-    "only opted-in repositories; blocked ones and forks drop out even when tagged",
+    ["ferromark", "ferroni"],
+    "only opted-in repositories; blocked, archived and forks drop out even when tagged",
   );
-  assert.deepEqual(metrics.github.ferroni, { stars: 7, forks: 1, archived: false, pushedAt: "2026-09-24T08:00:00Z" });
-  assert.equal(metrics.github["old-thing"]?.archived, true, "archived projects stay listed, flagged");
+  assert.deepEqual(metrics.github.ferroni, { stars: 7, forks: 1, pushedAt: "2026-09-24T08:00:00Z" });
   assert.deepEqual(metrics.crates.ferroni, {
     version: "1.4.2",
     downloads: 1746,

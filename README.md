@@ -21,7 +21,6 @@ the traffic, each identified by a User-Agent as crates.io asks.
     "ferroni": {
       "stars": 7,
       "forks": 1,
-      "archived": false,
       "pushedAt": "2026-09-24T19:00:00Z",
       "release": { "tag": "v1.5.1", "version": "1.5.1", "publishedAt": "2026-09-24T19:11:06Z" }
     }
@@ -50,12 +49,13 @@ the traffic, each identified by a User-Agent as crates.io asks.
 }
 ```
 
-- **What is listed:** public, non-fork repositories of the GitHub
+- **What is listed:** public, non-archived, non-fork repositories of the GitHub
   organization that carry the **`oss-project` topic** (opt-in, see below);
   every crate of the crates.io owner; every npm package of the maintainer except
-  per-platform binaries (`…-linux-x64-gnu` and friends). Archived projects stay
-  listed with `archived: true`, so a site can tell "archived" from "not a
-  project"; `pushedAt` is the repository's last push. Packages carry
+  per-platform binaries (`…-linux-x64-gnu` and friends). Every repository
+  carries `pushedAt`, its last push. An archived repository drops out of the
+  document, like one that loses the topic: a site that still lists it shows no
+  live numbers for it. Packages carry
   `publishedAt` (their latest publish) and `repo` when their metadata links to
   an organization repository — join them to `github` through it.
   Ownership is implicit — each source is queried _by owner_, so a look-alike
