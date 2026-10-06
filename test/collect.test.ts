@@ -9,6 +9,7 @@ const config: Config = {
   githubExcludeTopic: "oss-exclude",
   cratesUserId: "385008",
   npmMaintainer: "swernerx",
+  skillsRepo: "skills.sebastian-software.com",
   userAgent: "oss-metrics test",
 };
 
@@ -17,22 +18,54 @@ const json = (body: unknown, headers: Record<string, string> = {}) =>
 
 /** A fake upstream: one answer per source, recording every request it saw. */
 function upstream(
-  overrides: Partial<Record<"github" | "github2" | "releases" | "crates" | "npm", () => Response>> = {},
+  overrides: Partial<Record<"github" | "github2" | "releases" | "crates" | "npm" | "skills", () => Response>> = {},
 ) {
   const calls: { url: string; headers: Record<string, string> }[] = [];
   const answers = {
     github: () =>
       json(
         [
-          { name: "ferroni", topics: ["managed-deps", "oss-project"], stargazers_count: 7, forks_count: 1 },
+          {
+            name: "ferroni",
+            topics: ["managed-deps", "oss-project"],
+            stargazers_count: 7,
+            forks_count: 1,
+            pushed_at: "2026-09-24T08:00:00Z",
+          },
           { name: "homebrew-tap", topics: [], stargazers_count: 0, forks_count: 0 },
           { name: "standards", topics: ["oss-project", "oss-exclude"], stargazers_count: 2, forks_count: 0 },
-          { name: "old-thing", archived: true, topics: ["oss-project"], stargazers_count: 99, forks_count: 0 },
+          {
+            name: "old-thing",
+            archived: true,
+            topics: ["oss-project"],
+            stargazers_count: 99,
+            forks_count: 0,
+            pushed_at: "2024-01-01T00:00:00Z",
+          },
           { name: "a-fork", fork: true, topics: ["oss-project"], stargazers_count: 3, forks_count: 0 },
         ],
         { link: '<https://api.github.com/organizations/1/repos?page=2>; rel="next"' },
       ),
-    github2: () => json([{ name: "ferromark", topics: ["oss-project"], stargazers_count: 8, forks_count: 0 }]),
+    github2: () =>
+      json([
+        { name: "ferromark", topics: ["oss-project"], stargazers_count: 8, forks_count: 0, pushed_at: "2026-09-23T08:00:00Z" },
+      ]),
+    skills: () =>
+      json({
+        truncated: false,
+        tree: [
+          { path: "skills/effective-web/SKILL.md", type: "blob" },
+          { path: "skills/effective-web/references/forms.md", type: "blob" },
+          { path: "skills/effective-web/references/print.md", type: "blob" },
+          { path: "skills/effective-web/references", type: "tree" },
+          { path: "skills/effective-writing/SKILL.md", type: "blob" },
+          { path: "skills/effective-writing/evals/evals.json", type: "blob" },
+          { path: "skills/leftover/.DS_Store", type: "blob" },
+          { path: "instructions/request-and-completion.md", type: "blob" },
+          { path: "instructions/evals/request.json", type: "blob" },
+          { path: "README.md", type: "blob" },
+        ],
+      }),
     releases: () =>
       json({
         data: {
@@ -96,6 +129,7 @@ function upstream(
     calls.push({ url, headers: (init?.headers ?? {}) as Record<string, string> });
     if (url === "https://api.github.com/graphql") return answers.releases();
     if (url.includes("page=2") && url.includes("github")) return answers.github2();
+    if (url.includes("/git/trees/")) return answers.skills();
     if (url.startsWith("https://api.github.com/")) return answers.github();
     if (url.startsWith("https://crates.io/")) return answers.crates();
     if (url.startsWith("https://registry.npmjs.org/")) return answers.npm();
@@ -109,13 +143,14 @@ test("one document for the whole organization, from one request per source (plus
   const metrics = await collectMetrics(fetchImpl, config, new Date("2026-09-24T10:00:00.123Z"));
 
   assert.equal(metrics.generatedAt, "2026-09-24T10:00:00Z");
-  assert.deepEqual(metrics.sources, { github: "ok", releases: "skipped", crates: "ok", npm: "ok" });
+  assert.deepEqual(metrics.sources, { github: "ok", releases: "skipped", crates: "ok", npm: "ok", skills: "ok" });
   assert.deepEqual(
     Object.keys(metrics.github).sort(),
-    ["ferromark", "ferroni"],
-    "only opted-in repositories; blocked, archived and forks drop out even when tagged",
+    ["ferromark", "ferroni", "old-thing"],
+    "only opted-in repositories; blocked ones and forks drop out even when tagged",
   );
-  assert.deepEqual(metrics.github.ferroni, { stars: 7, forks: 1 });
+  assert.deepEqual(metrics.github.ferroni, { stars: 7, forks: 1, archived: false, pushedAt: "2026-09-24T08:00:00Z" });
+  assert.equal(metrics.github["old-thing"]?.archived, true, "archived projects stay listed, flagged");
   assert.deepEqual(metrics.crates.ferroni, {
     version: "1.4.2",
     downloads: 1746,
@@ -131,7 +166,7 @@ test("one document for the whole organization, from one request per source (plus
   });
   assert.equal(metrics.npm.ferromark?.repo, undefined, "a repository outside the org is not linked");
   assert.equal(metrics.npm["@palamedes/cli-linux-x64-gnu"], undefined, "platform binaries are not projects");
-  assert.equal(calls.length, 4, "github (2 pages), crates, npm");
+  assert.equal(calls.length, 5, "github (2 pages), skills tree, crates, npm");
   assert.ok(calls.every((call) => call.headers["user-agent"] === "oss-metrics test"), "every call identifies itself");
 });
 
@@ -201,7 +236,7 @@ test("a failing release lookup is reported without costing the stars", async () 
   const metrics = await collectMetrics(fetchImpl, { ...config, githubToken: "wrong" });
   assert.equal(metrics.sources.releases, "error");
   assert.equal(metrics.sources.github, "ok");
-  assert.deepEqual(metrics.github.ferroni, { stars: 7, forks: 1 });
+  assert.equal(metrics.github.ferroni?.stars, 7);
   assert.equal(metricsResponse(metrics).headers.get("cache-control"), "public, max-age=60, s-maxage=300");
 });
 
@@ -212,4 +247,25 @@ test("release tags of every shape give their plain version", () => {
   assert.equal(versionOfTag("v2.0.0-rc.2"), "2.0.0-rc.2");
   assert.equal(versionOfTag("1.0.0"), "1.0.0");
   assert.equal(versionOfTag("nightly"), undefined);
+});
+
+test("skills are counted from one tree request on the skills repository", async () => {
+  const { calls, fetchImpl } = upstream();
+  const metrics = await collectMetrics(fetchImpl, config);
+  assert.deepEqual(metrics.skills, {
+    skills: { "effective-web": { references: 2 }, "effective-writing": { references: 0 } },
+    instructionPacks: 1,
+  });
+  assert.equal(
+    calls.filter((call) => call.url.includes("/repos/sebastian-software/skills.sebastian-software.com/git/trees/HEAD?recursive=1")).length,
+    1,
+  );
+});
+
+test("a truncated or failing skills tree is an error that costs nothing else", async () => {
+  const { fetchImpl } = upstream({ skills: () => json({ truncated: true, tree: [] }) });
+  const metrics = await collectMetrics(fetchImpl, config);
+  assert.equal(metrics.sources.skills, "error");
+  assert.deepEqual(metrics.skills, { skills: {}, instructionPacks: 0 });
+  assert.equal(metrics.sources.github, "ok");
 });
