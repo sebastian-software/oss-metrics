@@ -125,42 +125,32 @@ Everything on Bunny is code in this repository and converges on every push to
    source `ok`, and a repeat request served from the cache (`CDN-Cache: HIT`).
    A failed check fails the workflow.
 
-### Deployment credentials (Limen / SOPS)
+### Deployment credentials (GitHub Actions secrets)
 
-The workflow decrypts `.limen/production/.env.production.local.sops.env` through
-Limen using GitHub OIDC. `.limen.yaml` maps it to the ignored
-`.env.production.local`; that file is restricted to mode `0600`, its credentials
-are masked before use, and the workflow removes it on completion. Only
-`BUNNY_API_KEY` and the optional `METRICS_GITHUB_TOKEN` are imported.
+The workflow reads `BUNNY_API_KEY` directly from the shared organization Actions secret.
+Provisioning and publishing are restricted to `main`; the Bunny credential is passed only
+to those two steps. No Limen policy, private action, install token, OIDC permission or
+plaintext credential file is required in CI.
 
-- `BUNNY_API_KEY` is the account key used for provisioning and publishing.
-- `METRICS_GITHUB_TOKEN` may be a fine-grained, public-read-only token to increase
-  the GitHub API rate limit. Without it, the service uses public unauthenticated
-  requests. Origin Shield and CDN caching reduce upstream traffic. Do not put a
-  short-lived Actions `GITHUB_TOKEN` into the edge script: it expires when the
-  workflow finishes.
-- The only GitHub secret needed is the existing organization secret
-  `LIMEN_INSTALL_TOKEN`, with repository access granted to `oss-metrics`. It
-  downloads the private Limen action and CLI. The public workflow checks out the
-  action at a pinned commit rather than using a private action directly.
-- Limen's allowlist is restricted to `sebastian-software/oss-metrics`,
-  `refs/heads/main`, the `deploy.yml` workflow on `main`, and the GitHub
-  Environment `production`. The Environment allows only the `main` branch.
+- `BUNNY_API_KEY` is the account key used for provisioning and publishing. Grant this
+  repository access to the organization secret.
+- `METRICS_GITHUB_TOKEN` remains an optional Actions secret: a fine-grained,
+  public-read-only token can increase the GitHub API rate limit. Without it, the service
+  uses public unauthenticated requests. Origin Shield and CDN caching reduce upstream
+  traffic. Do not put the short-lived Actions `GITHUB_TOKEN` into the edge script: it
+  expires when the workflow finishes.
 
-A missing install token, a denied OIDC request, or a missing Bunny credential
-fails the deployment. It is never reported as a successful skipped rollout.
-
-For local deployment or credential updates, install Limen and SOPS, then:
+A missing Bunny credential fails deployment. It is never reported as a successful
+skipped rollout. For local deployment, set the same process environment variables or
+use an ignored `.env.production.local` file:
 
 ```sh
-limen login
-limen sync                   # also registers local merge/diff drivers
-limen decrypt --env production
 node --env-file=.env.production.local scripts/provision.ts
-# Edit the encrypted file through Limen; never commit plaintext.
-limen edit .limen/production/.env.production.local.sops.env
-limen sync --check
 ```
+
+The Bunny provision, publish and verification scripts and hosting configuration are
+unchanged by the credential migration. The existing shared Limen installation and
+other repositories that use it are unaffected.
 
 The DNS record is `metrics.sebastian-software.com CNAME
 sebastian-oss-metrics.b-cdn.net` (TTL 300). The provisioner retries certificate
