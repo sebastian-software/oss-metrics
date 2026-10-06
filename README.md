@@ -16,11 +16,13 @@ the traffic, each identified by a User-Agent as crates.io asks.
 {
   "schema": 1,
   "generatedAt": "2026-09-24T10:00:00Z",
-  "sources": { "github": "ok", "releases": "ok", "crates": "ok", "npm": "ok" },
+  "sources": { "github": "ok", "releases": "ok", "crates": "ok", "npm": "ok", "skills": "ok" },
   "github": {
     "ferroni": {
       "stars": 7,
       "forks": 1,
+      "archived": false,
+      "pushedAt": "2026-09-24T19:00:00Z",
       "release": { "tag": "v1.5.1", "version": "1.5.1", "publishedAt": "2026-09-24T19:11:06Z" }
     }
   },
@@ -40,21 +42,31 @@ the traffic, each identified by a User-Agent as crates.io asks.
       "publishedAt": "2026-09-09T12:00:00Z",
       "repo": "palamedes"
     }
+  },
+  "skills": {
+    "skills": { "effective-web": { "references": 133 } },
+    "instructionPacks": 2
   }
 }
 ```
 
-- **What is listed:** public, non-archived, non-fork repositories of the GitHub
+- **What is listed:** public, non-fork repositories of the GitHub
   organization that carry the **`oss-project` topic** (opt-in, see below);
   every crate of the crates.io owner; every npm package of the maintainer except
-  per-platform binaries (`…-linux-x64-gnu` and friends). Packages carry
+  per-platform binaries (`…-linux-x64-gnu` and friends). Archived projects stay
+  listed with `archived: true`, so a site can tell "archived" from "not a
+  project"; `pushedAt` is the repository's last push. Packages carry
   `publishedAt` (their latest publish) and `repo` when their metadata links to
   an organization repository — join them to `github` through it.
   Ownership is implicit — each source is queried _by owner_, so a look-alike
   package somebody else published never appears.
-- **Four upstream requests** per refresh (GitHub pages add one each per 100
+- **Skills:** `skills` counts the agent skills of `skills.sebastian-software.com`
+  (`SKILLS_REPO`): one entry per `skills/<name>/SKILL.md` with the number of
+  `references/*.md` files, plus the number of `instructions/*.md` packs. The
+  counts come from one recursive tree request on the default branch.
+- **Five upstream requests** per refresh (GitHub pages add one each per 100
   repositories): GitHub `orgs/{org}/repos`, one GitHub GraphQL query for every
-  repository's latest release, crates.io `crates?user_id=`, npm
+  repository's latest release, the skills repository's tree, crates.io `crates?user_id=`, npm
   `-/v1/search?text=maintainer:`. The npm search carries versions and monthly
   downloads for scoped packages too.
 - **Releases:** `github.<repo>.release` is the release GitHub marks "Latest"

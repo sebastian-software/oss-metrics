@@ -16,6 +16,7 @@ const config: Config = {
   githubTopic: process.env.GITHUB_TOPIC ?? "oss-project",
   githubExcludeTopic: process.env.GITHUB_EXCLUDE_TOPIC ?? "oss-exclude",
   githubToken: process.env.GITHUB_TOKEN,
+  skillsRepo: process.env.SKILLS_REPO ?? "skills.sebastian-software.com",
   cratesUserId: process.env.CRATES_USER_ID ?? "385008",
   npmMaintainer: process.env.NPM_MAINTAINER ?? "swernerx",
   userAgent: "oss-metrics (https://github.com/sebastian-software/oss-metrics)",

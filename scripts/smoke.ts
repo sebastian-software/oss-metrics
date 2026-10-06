@@ -13,6 +13,7 @@ const metrics = await collectMetrics(fetch, {
   githubTopic: "oss-project",
   githubExcludeTopic: "oss-exclude",
   githubToken: process.env.GITHUB_TOKEN,
+  skillsRepo: process.env.SKILLS_REPO ?? "skills.sebastian-software.com",
   cratesUserId: "385008",
   npmMaintainer: "swernerx",
   userAgent: "oss-metrics smoke (https://github.com/sebastian-software/oss-metrics)",

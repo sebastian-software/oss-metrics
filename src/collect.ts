@@ -22,6 +22,8 @@ export type Config = {
   githubExcludeTopic: string;
   /** Optional token: raises GitHub's limit from 60 to 5,000 requests an hour. */
   githubToken?: string;
+  /** Repository of the organization that holds the agent skills, read for the `skills` section. */
+  skillsRepo: string;
   /** Numeric crates.io user id whose crates are listed (swernerx: 385008). */
   cratesUserId: string;
   /** npm maintainer whose packages are listed. */
@@ -36,7 +38,23 @@ export type Config = {
  * `ferrolex-v0.4.0` both give the plain version.
  */
 export type ReleaseMetrics = { tag: string; version: string; publishedAt: string };
-export type RepoMetrics = { stars: number; forks: number; release?: ReleaseMetrics };
+/**
+ * `archived` repositories are listed so sites can tell "archived" from "not a
+ * project"; `pushedAt` is the last push, from which sites derive activity.
+ */
+export type RepoMetrics = {
+  stars: number;
+  forks: number;
+  archived: boolean;
+  pushedAt: string;
+  release?: ReleaseMetrics;
+};
+/** One agent skill: the number of focused references it routes to. */
+export type SkillMetrics = { references: number };
+export type SkillsMetrics = {
+  skills: Record<string, SkillMetrics>;
+  instructionPacks: number;
+};
 /** `repo` names the organization repository the package links to, when it does. */
 export type CrateMetrics = {
   version: string;
@@ -57,10 +75,17 @@ export type SourceStatus = "error" | "ok" | "skipped";
 export type Metrics = {
   schema: 1;
   generatedAt: string;
-  sources: { github: SourceStatus; releases: SourceStatus; crates: SourceStatus; npm: SourceStatus };
+  sources: {
+    github: SourceStatus;
+    releases: SourceStatus;
+    crates: SourceStatus;
+    npm: SourceStatus;
+    skills: SourceStatus;
+  };
   github: Record<string, RepoMetrics>;
   crates: Record<string, CrateMetrics>;
   npm: Record<string, PackageMetrics>;
+  skills: SkillsMetrics;
 };
 
 type Fetch = (input: string, init?: RequestInit) => Promise<Response>;
@@ -117,13 +142,16 @@ export async function collectGithub(fetchImpl: Fetch, config: Config) {
   for (let page = 0; url !== undefined && page < MAX_PAGES.github; page += 1) {
     const { body, next }: { body: unknown; next?: string } = await getJson(fetchImpl, url, headers);
     for (const repo of Array.isArray(body) ? (body as unknown[]) : []) {
-      if (!isRecord(repo) || repo.archived === true || repo.fork === true) continue;
+      if (!isRecord(repo) || repo.fork === true) continue;
       const topics = Array.isArray(repo.topics) ? repo.topics : [];
       if (!topics.includes(config.githubTopic) || topics.includes(config.githubExcludeTopic)) continue;
       const name = text(repo, "name");
       const stars = count(repo, "stargazers_count");
       const forks = count(repo, "forks_count");
-      if (name && stars !== undefined && forks !== undefined) repos[name] = { stars, forks };
+      const pushedAt = text(repo, "pushed_at");
+      if (name && stars !== undefined && forks !== undefined && pushedAt) {
+        repos[name] = { stars, forks, archived: repo.archived === true, pushedAt };
+      }
     }
     url = next;
   }
@@ -247,8 +275,40 @@ export async function collectNpm(fetchImpl: Fetch, config: Config) {
   return packages;
 }
 
+const SKILL_FILE = /^skills\/([^/]+)\/SKILL\.md$/u;
+const SKILL_REFERENCE = /^skills\/([^/]+)\/references\/[^/]+\.md$/u;
+const INSTRUCTION_PACK = /^instructions\/[^/]+\.md$/u;
+
 /**
- * Collects all three sources in parallel. A source that fails is reported as
+ * Counts the skills, their references, and the instruction packs of the skills
+ * repository from one recursive tree request on its default branch. Sites show
+ * these counts instead of maintaining them by hand.
+ */
+export async function collectSkills(fetchImpl: Fetch, config: Config): Promise<SkillsMetrics> {
+  const headers: Record<string, string> = { "user-agent": config.userAgent };
+  if (config.githubToken) headers.authorization = `Bearer ${config.githubToken}`;
+  const repo = `${encodeURIComponent(config.githubOrg)}/${encodeURIComponent(config.skillsRepo)}`;
+  const { body } = await getJson(fetchImpl, `https://api.github.com/repos/${repo}/git/trees/HEAD?recursive=1`, headers);
+  if (!isRecord(body) || !Array.isArray(body.tree)) throw new Error("GitHub answered without a tree");
+  if (body.truncated === true) throw new Error("The skills tree is too large for one request");
+  const paths = (body.tree as unknown[]).flatMap((entry) => {
+    const path = isRecord(entry) && entry.type === "blob" ? text(entry, "path") : undefined;
+    return path === undefined ? [] : [path];
+  });
+  const skills: Record<string, SkillMetrics> = {};
+  for (const path of paths) {
+    const name = SKILL_FILE.exec(path)?.[1];
+    if (name !== undefined) skills[name] = { references: 0 };
+  }
+  for (const path of paths) {
+    const skill = skills[SKILL_REFERENCE.exec(path)?.[1] ?? ""];
+    if (skill !== undefined) skill.references += 1;
+  }
+  return { skills, instructionPacks: paths.filter((path) => INSTRUCTION_PACK.test(path)).length };
+}
+
+/**
+ * Collects all sources in parallel. A source that fails is reported as
  * `"error"` with an empty map; the others still answer.
  */
 export async function collectMetrics(
@@ -256,11 +316,12 @@ export async function collectMetrics(
   config: Config,
   now: Date = new Date(),
 ): Promise<Metrics> {
-  const [github, releases, crates, npm] = await Promise.allSettled([
+  const [github, releases, crates, npm, skills] = await Promise.allSettled([
     collectGithub(fetchImpl, config),
     config.githubToken ? collectReleases(fetchImpl, config) : Promise.resolve(null),
     collectCrates(fetchImpl, config),
     collectNpm(fetchImpl, config),
+    collectSkills(fetchImpl, config),
   ]);
   const repos = github.status === "fulfilled" ? github.value : {};
   // Releases join the listed repositories only: the topic filter decides what a project is.
@@ -278,10 +339,12 @@ export async function collectMetrics(
       releases: releaseStatus(releases),
       crates: crates.status === "fulfilled" ? "ok" : "error",
       npm: npm.status === "fulfilled" ? "ok" : "error",
+      skills: skills.status === "fulfilled" ? "ok" : "error",
     },
     github: repos,
     crates: crates.status === "fulfilled" ? crates.value : {},
     npm: npm.status === "fulfilled" ? npm.value : {},
+    skills: skills.status === "fulfilled" ? skills.value : { skills: {}, instructionPacks: 0 },
   };
 }
 
