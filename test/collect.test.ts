@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { collectMetrics, collectNpm, type Config, metricsResponse, repoOf, versionOfTag } from "../src/collect.ts";
+import { collectGithub, collectMetrics, collectNpm, type Config, metricsResponse, repoOf, versionOfTag } from "../src/collect.ts";
 
 const config: Config = {
   githubOrg: "sebastian-software",
@@ -175,13 +175,28 @@ test("one document for the organization, including each crate's 30-day downloads
   assert.ok(calls.every((call) => call.headers["user-agent"] === "oss-metrics test"), "every call identifies itself");
 });
 
+test("maintainers can declare the core language independently of GitHub's byte classification", async () => {
+  const { fetchImpl } = upstream({ github: () => json([
+    { name: "ferriki", topics: ["oss-project", "oss-language-rust"], language: "TypeScript",
+      stargazers_count: 1, forks_count: 0, pushed_at: "2026-10-19T00:00:00Z" },
+    { name: "ambiguous", topics: ["oss-project", "oss-language-rust", "oss-language-typescript"], language: "JavaScript",
+      stargazers_count: 1, forks_count: 0, pushed_at: "2026-10-19T00:00:00Z" },
+    { name: "ordinary", topics: ["oss-project", "toString"], language: null,
+      stargazers_count: 1, forks_count: 0, pushed_at: "2026-10-19T00:00:00Z" },
+  ]) });
+  const projects = await collectGithub(fetchImpl, config);
+  assert.equal(projects.ferriki.coreLanguage, "Rust");
+  assert.equal(projects.ferriki.language, "TypeScript", "GitHub's original classification stays available");
+  assert.equal(projects.ambiguous.coreLanguage, undefined, "conflicting declarations do not pick an arbitrary winner");
+  assert.equal(projects.ordinary.coreLanguage, undefined);
+});
+
 test("native Node.js bindings require explicit npm metadata and exclude CLI launchers and platform artifacts", async () => {
   const cases = [
     { name: "@example/core-node", keywords: ["rust", "N-API"], binding: true },
     { name: "@example/core", keywords: ["napi-rs"], binding: true },
     { name: "native-example", keywords: ["node-api"], binding: true },
     { name: "get-example", keywords: ["rust", "native", "cli", "nodejs"], binding: undefined },
-    { name: "@example/linux-x64-gnu", keywords: ["napi"], binding: undefined },
     { name: "plain-example", keywords: null, binding: undefined },
     { name: "bad-keyword-example", keywords: [42, {}, "bindings"], binding: undefined },
   ];
@@ -195,6 +210,16 @@ test("native Node.js bindings require explicit npm metadata and exclude CLI laun
     assert.equal(packages[item.name].repo, "example");
   }
   assert.equal(calls.length, 1, "classification reuses the existing maintainer search without extra requests");
+});
+
+test("npm platform variants are excluded without removing the binding or ordinary packages", async () => {
+  const names = ["@ferriki/core", "@ferriki/vite", "@ferriki/linux-x64-gnu", "@ferriki/darwin-arm64",
+    "@ferriki/win32-arm64-msvc", "@palamedes/cli-linux-x64-gnu", "@turndown-node/linux-arm64-gnu", "plain-package"];
+  const { fetchImpl } = upstream({ npm: () => json({ objects: names.map((name) => ({
+    package: { name, version: "1.0.0", date: "2026-10-19T00:00:00Z", keywords: ["napi"] },
+    downloads: { monthly: 100 },
+  })) }) });
+  assert.deepEqual(Object.keys(await collectNpm(fetchImpl, config)), ["@ferriki/core", "@ferriki/vite", "plain-package"]);
 });
 
 test("a token goes to GitHub only", async () => {
