@@ -16,7 +16,7 @@ the traffic, each identified by a User-Agent as crates.io asks.
 {
   "schema": 1,
   "generatedAt": "2026-09-24T10:00:00Z",
-  "sources": { "github": "ok", "releases": "ok", "crates": "ok", "npm": "ok", "skills": "ok" },
+  "sources": { "github": "ok", "releases": "ok", "crates": "ok", "npm": "ok", "skills": "ok", "rybbit": "skipped" },
   "github": {
     "ferroni": {
       "stars": 7,
@@ -45,7 +45,8 @@ the traffic, each identified by a User-Agent as crates.io asks.
   "skills": {
     "skills": { "effective-web": { "references": 133 } },
     "instructionPacks": 2
-  }
+  },
+  "usage": {}
 }
 ```
 
@@ -85,6 +86,158 @@ the traffic, each identified by a User-Agent as crates.io asks.
   zone rules below. CORS is open (`Access-Control-Allow-Origin: *`).
 - **Size:** about 15 KB, 3 KB gzipped (28 projects, 18 crates, 92 npm packages,
   2026-09-24).
+
+## CLI usage from Rybbit
+
+The optional `rybbit` source adds at most two authenticated aggregate requests
+per refresh. It queries only `update_check` properties and publishes allowlisted
+project totals in `usage`. It does not query raw events, visitors, sessions, or
+user counts. Missing configuration or credentials gives `sources.rybbit:
+"skipped"` and `usage: {}`. Authentication, timeout, malformed data, or query-limit
+failures give `"error"` and an empty usage map; other sources remain available.
+
+Example output with synthetic values:
+
+```json
+{
+  "usage": {
+    "palamedes": {
+      "unit": "update_checks",
+      "collectedAt": "2026-10-19T12:00:00Z",
+      "verified": false,
+      "windows": {
+        "days7": {
+          "start": "2026-10-12T00:00:00Z",
+          "end": "2026-10-19T00:00:00Z",
+          "count": 12,
+          "observedCount": 12,
+          "coverage": "complete",
+          "observedFrom": "2026-10-12T00:00:00Z"
+        },
+        "days30": {
+          "start": "2026-09-19T00:00:00Z",
+          "end": "2026-10-19T00:00:00Z",
+          "count": null,
+          "observedCount": 30,
+          "coverage": "partial",
+          "observedFrom": "2026-10-01T00:00:00Z"
+        }
+      }
+    }
+  }
+}
+```
+
+- `start` is inclusive and `end` exclusive. Both windows end at the start of
+  the current UTC day, so today's partial activity is excluded.
+- `count` is a number only for complete coverage. `observedCount` includes only
+  the retained, eligible interval beginning at `observedFrom`. Partial coverage
+  has `count: null`; unverified retention has `coverage: "unverified"` and
+  `count: null`. Unavailable coverage has both counts and `observedFrom` set to
+  `null`. A successful, complete empty result is zero.
+- `collectedAt` belongs to this source observation. Cached responses retain it;
+  there is no last-successful snapshot that gets a newer timestamp.
+- Counts represent requests, including repeated checks and CI. They do not
+  estimate distinct people, WAU/MAU, installations, or retention. Website copy
+  belongs to the consumer; the API preserves the measured unit.
+- `verified` defaults to `false`. Add a project to `verifiedProjects` only after
+  its published client has been observed reaching Rybbit. Palamedes
+  [#1036](https://github.com/sebastian-software/palamedes/issues/1036) owns that
+  observation, and [#1277](https://github.com/sebastian-software/palamedes/issues/1277)
+  owns website consumption. Consumers should hide unavailable/unverified values
+  or make their state explicit.
+
+### Private configuration
+
+Set these two GitHub Actions secrets together:
+
+- `METRICS_RYBBIT_API_KEY`: a dedicated integration key with the narrowest
+  analytics read permissions supported by the deployed version. Never use the
+  account login password as an API key.
+- `METRICS_RYBBIT_CONFIG`: a JSON object in this form, using the actual private
+  origin and numeric site ID. This example has no production identifiers:
+
+Rybbit 2.6.0 inherits the key owner's organization permissions and does not
+enforce analytics-only/read-only scopes. A separate integration key supports
+independent revocation; it does not reduce those inherited permissions.
+
+```json
+{
+  "endpoint": "https://analytics.example.invalid",
+  "siteId": "42",
+  "projects": ["palamedes"],
+  "availableFrom": "2026-10-01",
+  "retentionDays": 90,
+  "verifiedProjects": []
+}
+```
+
+`availableFrom` is the first complete UTC day of continuous, eligible collection,
+after all known synthetic verification traffic. Verify that cutoff privately;
+do not infer continuous coverage from the oldest visible event. Later synthetic
+checks require moving the cutoff past them or a separately verified exclusion
+mechanism. This first version excludes the entire earlier period instead of
+subtracting unrelated property totals. Use a separate site for future synthetic
+verification traffic when possible.
+
+`retentionDays` is `null` until retention and continuous collection have been
+verified. In that state the source still publishes observed counts, with
+unverified coverage and no complete-window count. Set a numeric value only for
+a verified lower bound on event retention in the actual deployment. It must not
+be an assumption from upstream defaults. Rolling retention is
+rounded inward to complete UTC days: a 30-day retention policy usually cannot
+cover the last 30 **complete** days at midday.
+
+Provisioning validates the pair and stores both values as Bunny runtime secrets
+`RYBBIT_API_KEY` and `RYBBIT_CONFIG`. Neither value enters the public JSON or
+bundle. Locally, set those runtime names to exercise `pnpm smoke`. Removing an
+Actions secret does not delete its previously provisioned Bunny secret; disable
+analytics explicitly by clearing the runtime configuration or deleting the two
+runtime secrets in Bunny. A partial Actions configuration fails provisioning.
+
+### API shape and rollout evidence
+
+The implementation targets the properties response from Rybbit v2.6.0:
+[`GET /api/sites/:site/events/properties`](https://rybbit.com/docs/api/events/properties),
+with exact `event_name=update_check`, `time_zone=UTC`, and exclusive datetime
+boundaries. That version's
+[implementation](https://github.com/rybbit-io/rybbit/blob/v2.6.0/server/src/api/analytics/events/getEventProperties.ts)
+has an unpaginated `LIMIT 500` across **all** property/value pairs. A result with
+500 or more rows fails closed. Responses must contain only `data`, with unique
+property/value pairs and safe nonnegative integer counts. The six properties
+(`project`, `version`, `os`, `arch`, `mode`, `installedSince`) must have matching
+total counts, or the event protocol is incomplete.
+
+The source uses one five-second deadline for both requests, rejects redirects,
+bounds each response to 256 KiB, and emits fixed errors without private upstream
+details. No CI/local, version, platform, or cohort breakdowns are public.
+Separate `project` and `mode` marginals do not establish their joint grouping.
+
+Before enabling production, verify the deployed API version, Bearer auth, exact
+event/time isolation, row limits, retention, clean-data cutoff, and allowlist.
+Compare a complete UTC window against a private aggregate query and record only
+aggregate counts, interval, collection time, and source/deploy revision. Current
+upstream documentation alone is not deployment evidence. If a larger dataset
+reaches the hard limit or needs joint property grouping, a private aggregate
+export or a separately verified bounded reducer is needed; this collector never
+silently truncates or falls back to raw-event pagination.
+
+On 2026-10-19, the deployed Rybbit instance reported version 2.6.0. Private
+read-only checks established successful login and Bearer authentication, an empty
+aggregate for a nonexistent event, and rejection of a custom `project` filter
+(HTTP 500). Both real responses were below the 500-row limit and had matching
+totals for all six properties. The actual collector matched the private query:
+
+| UTC start (inclusive) | UTC end (exclusive) | Observed Palamedes update checks |
+| --- | --- | --- |
+| 2026-10-12 00:00:00 | 2026-10-19 00:00:00 | 31 |
+| 2026-09-19 00:00:00 | 2026-10-19 00:00:00 | 172 |
+
+Retention and continuous historical collection were not independently verified,
+so the initial private configuration uses `retentionDays: null` and
+`verifiedProjects: []`. These observations prove that querying works; they do
+not complete the published-client observation or establish complete coverage.
+No raw events or provider identifiers are included in this evidence.
 
 ## Which repositories are projects
 
@@ -133,6 +286,8 @@ Everything on Bunny is code in this repository and converges on every push to
    up by name, settings written only when they differ — a second run changes
    no infrastructure settings. Variables and secrets are idempotent upserts on
    every run. The desired state is the `DESIRED` object at the top of the script.
+   Rybbit configuration and credentials are provisioned as runtime secrets when
+   both optional Actions secrets described above are configured.
 3. `scripts/publish.ts` — uploads `dist/script.js`, publishes it as a release
    (noted with the commit), purges the pull zone.
 4. `scripts/verify.ts` — smoke check against the `b-cdn.net` host (and the custom

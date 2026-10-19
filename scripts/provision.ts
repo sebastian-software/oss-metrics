@@ -10,6 +10,24 @@
  *   BUNNY_API_KEY=… METRICS_GITHUB_TOKEN=… node scripts/provision.ts
  */
 import { type BunnyApi, bunnyApi, BunnyError, required, setOutputs } from "./bunny.ts";
+import { validateRybbitConfig } from "../src/rybbit.ts";
+
+/** Only explicitly supported secrets cross from Actions into the edge runtime. */
+export function runtimeSecrets(env: Record<string, string | undefined>): Record<string, string> {
+  const secrets: Record<string, string> = {};
+  if (env.METRICS_GITHUB_TOKEN) secrets.GITHUB_TOKEN = env.METRICS_GITHUB_TOKEN;
+  const settings = env.METRICS_RYBBIT_CONFIG;
+  const apiKey = env.METRICS_RYBBIT_API_KEY;
+  if (Boolean(settings) !== Boolean(apiKey)) {
+    throw new Error("METRICS_RYBBIT_CONFIG and METRICS_RYBBIT_API_KEY must be configured together");
+  }
+  if (settings && apiKey) {
+    validateRybbitConfig({ settings, apiKey });
+    secrets.RYBBIT_CONFIG = settings;
+    secrets.RYBBIT_API_KEY = apiKey;
+  }
+  return secrets;
+}
 
 /** Everything the hosting consists of, as data. */
 export const DESIRED = {
@@ -188,7 +206,7 @@ if (import.meta.main) {
   const api = bunnyApi(required("BUNNY_API_KEY"));
   const token = process.env.METRICS_GITHUB_TOKEN;
   if (!token) console.log("::notice::METRICS_GITHUB_TOKEN is not set; GitHub uses the public unauthenticated rate limit.");
-  const result = await provision(api, DESIRED, token ? { GITHUB_TOKEN: token } : {});
+  const result = await provision(api, DESIRED, runtimeSecrets(process.env));
   console.log(result.changes.length > 0 ? result.changes.map((change) => `- ${change}`).join("\n") : "no changes");
   await setOutputs({
     script_id: String(result.scriptId),

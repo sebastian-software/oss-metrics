@@ -39,7 +39,7 @@ export async function verify(base: string): Promise<void> {
     console.log(`${base}${PATH} #${attempt}: ${last.reason}, CDN-Cache ${last.cache ?? "—"}`);
     if (last.ok && last.cache?.toUpperCase() === "HIT") {
       if (last.skipped?.length) {
-        console.log(`::notice::${base}: skipped sources (${last.skipped.join(", ")}); set METRICS_GITHUB_TOKEN to enable releases.`);
+        console.log(`::notice::${base}: skipped optional sources (${last.skipped.join(", ")}); see the README for configuration.`);
       }
       return;
     }

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { type BunnyApi, BunnyError } from "../scripts/bunny.ts";
-import { DESIRED, provision } from "../scripts/provision.ts";
+import { DESIRED, provision, runtimeSecrets } from "../scripts/provision.ts";
 import { publish } from "../scripts/publish.ts";
 
 type Call = { method: string; path: string; body?: unknown };
@@ -166,4 +166,29 @@ test("publish uploads, releases and purges, in that order", async () => {
     ["POST /compute/script/42/code", "POST /compute/script/42/publish", "POST /pullzone/900/purgeCache"],
   );
   assert.deepEqual(bunny.calls[1].body, { Note: "abc1234 main" });
+});
+
+test("analytics secrets are validated, passed only as runtime secrets, and never logged", async (t) => {
+  const settings = JSON.stringify({
+    endpoint: "https://analytics.example.invalid", siteId: "42", projects: ["palamedes"],
+    availableFrom: "2026-09-01", retentionDays: 90,
+  });
+  const secrets = runtimeSecrets({
+    METRICS_GITHUB_TOKEN: "github-test", METRICS_RYBBIT_CONFIG: settings,
+    METRICS_RYBBIT_API_KEY: "rybbit-test", UNRELATED_SECRET: "unrelated-test",
+  });
+  assert.deepEqual(secrets, { GITHUB_TOKEN: "github-test", RYBBIT_CONFIG: settings, RYBBIT_API_KEY: "rybbit-test" });
+  const log = t.mock.method(console, "log", () => {});
+  const bunny = fakeBunny({ dnsReady: true });
+  await provision(bunny.api, DESIRED, secrets);
+  assert.equal(bunny.state.secrets.get("RYBBIT_CONFIG"), settings);
+  assert.equal(bunny.state.secrets.get("RYBBIT_API_KEY"), "rybbit-test");
+  assert.ok(!bunny.state.variables.has("RYBBIT_API_KEY"));
+  assert.ok(!bunny.state.variables.has("RYBBIT_CONFIG"));
+  assert.equal(log.mock.calls.length, 0);
+  assert.deepEqual(runtimeSecrets({}), {});
+  assert.throws(() => runtimeSecrets({ METRICS_RYBBIT_API_KEY: "private-value" }), /must be configured together/u);
+  assert.throws(() => runtimeSecrets({
+    METRICS_RYBBIT_CONFIG: 'private-value', METRICS_RYBBIT_API_KEY: "private-value",
+  }), { message: "Invalid Rybbit configuration" });
 });

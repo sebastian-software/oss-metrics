@@ -143,7 +143,8 @@ test("one document for the whole organization, from one request per source (plus
   const metrics = await collectMetrics(fetchImpl, config, new Date("2026-09-24T10:00:00.123Z"));
 
   assert.equal(metrics.generatedAt, "2026-09-24T10:00:00Z");
-  assert.deepEqual(metrics.sources, { github: "ok", releases: "skipped", crates: "ok", npm: "ok", skills: "ok" });
+  assert.deepEqual(metrics.sources, { github: "ok", releases: "skipped", crates: "ok", npm: "ok", skills: "ok", rybbit: "skipped" });
+  assert.deepEqual(metrics.usage, {});
   assert.deepEqual(
     Object.keys(metrics.github).sort(),
     ["ferromark", "ferroni"],
@@ -189,6 +190,28 @@ test("a failing source is reported, the others still answer, and the cache stays
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("cache-control"), "public, max-age=60, s-maxage=300");
   assert.equal(response.headers.get("access-control-allow-origin"), "*");
+});
+
+test("analytics authentication failure preserves registry and GitHub data without exposing its configuration", async () => {
+  const { fetchImpl } = upstream();
+  const metrics = await collectMetrics(async (url, init) => url.startsWith("https://analytics.example.invalid")
+    ? new Response("private upstream error", { status: 401 }) : fetchImpl(url, init), {
+    ...config,
+    rybbit: {
+      apiKey: "private-test-key",
+      settings: JSON.stringify({ endpoint: "https://analytics.example.invalid", siteId: "42", projects: ["palamedes"],
+        availableFrom: "2026-09-01", retentionDays: 90 }),
+    },
+  }, new Date("2026-10-19T12:00:00Z"));
+  assert.equal(metrics.sources.rybbit, "error");
+  assert.equal(metrics.sources.github, "ok");
+  assert.equal(metrics.sources.npm, "ok");
+  assert.equal(metrics.github.ferroni.stars, 7);
+  assert.deepEqual(metrics.usage, {});
+  const response = metricsResponse(metrics);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("cache-control"), "public, max-age=60, s-maxage=300");
+  assert.ok(!(await response.text()).includes("private-"));
 });
 
 test("nothing answered: a 502 that no cache keeps", async () => {
