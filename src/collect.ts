@@ -10,6 +10,7 @@
  */
 
 import { collectRybbit, type ProjectUsage, type RybbitSourceConfig } from "./rybbit.ts";
+import { downloadsWindow, sumCrateDownloads, type Downloads30Days } from "./crate-downloads.ts";
 
 export type Config = {
   /** GitHub organization whose projects are listed. */
@@ -55,6 +56,7 @@ export type CrateMetrics = {
   version: string;
   downloads: number;
   recentDownloads: number;
+  downloads30Days: Downloads30Days;
   publishedAt: string;
   repo?: string;
 };
@@ -221,12 +223,24 @@ function addRelease(releases: Record<string, ReleaseMetrics>, node: unknown) {
   if (name && tag && version && publishedAt) releases[name] = { tag, version, publishedAt };
 }
 
-export async function collectCrates(fetchImpl: Fetch, config: Config) {
+export async function collectCrates(fetchImpl: Fetch, config: Config, now: Date = new Date()) {
   const headers = { "user-agent": config.userAgent };
   const crates: Record<string, CrateMetrics> = {};
+  const window = downloadsWindow(now);
+  const deadline = AbortSignal.timeout(40_000);
+  let nextRequestAt = 0;
+  // crates.io requires at most one API request per second. The existing origin
+  // shield and request coalescing keep cache misses from multiplying collections.
+  const limitedFetch: Fetch = async (url, init) => {
+    const wait = nextRequestAt - Date.now();
+    if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+    deadline.throwIfAborted();
+    nextRequestAt = Date.now() + 1100;
+    return fetchImpl(url, { ...init, signal: AbortSignal.any([deadline, AbortSignal.timeout(6000)]) });
+  };
   for (let page = 1; page <= MAX_PAGES.crates; page += 1) {
     const url = `https://crates.io/api/v1/crates?user_id=${encodeURIComponent(config.cratesUserId)}&per_page=100&page=${page}`;
-    const { body } = await getJson(fetchImpl, url, headers);
+    const { body } = await getJson(limitedFetch, url, headers);
     const list = isRecord(body) && Array.isArray(body.crates) ? (body.crates as unknown[]) : [];
     for (const crate of list) {
       if (!isRecord(crate)) continue;
@@ -237,10 +251,22 @@ export async function collectCrates(fetchImpl: Fetch, config: Config) {
       const publishedAt = text(crate, "updated_at");
       const repo = repoOf(crate.repository, config.githubOrg);
       if (id && version && downloads !== undefined && publishedAt) {
-        crates[id] = { version, downloads, recentDownloads, publishedAt, ...(repo ? { repo } : {}) };
+        crates[id] = { version, downloads, recentDownloads, downloads30Days: { ...window }, publishedAt, ...(repo ? { repo } : {}) };
       }
     }
     if (list.length < 100) break;
+  }
+  // At most 30 extra calls leave room under Bunny's 50-subrequest limit, even
+  // with all bounded source pages. Missing enrichment never erases metadata.
+  for (const [name, crate] of Object.entries(crates).slice(0, 30)) {
+    try {
+      const { body } = await getJson(limitedFetch, `https://crates.io/api/v1/crates/${encodeURIComponent(name)}/downloads`, headers);
+      crate.downloads30Days.count = sumCrateDownloads(body, window);
+    } catch {
+      // Stop on a failure (including 429 or timeout); preserve completed counts
+      // and retry through the shorter partial-response cache.
+      break;
+    }
   }
   return crates;
 }
@@ -316,7 +342,7 @@ export async function collectMetrics(
   const [github, releases, crates, npm, skills, rybbit] = await Promise.allSettled([
     collectGithub(fetchImpl, config),
     config.githubToken ? collectReleases(fetchImpl, config) : Promise.resolve(null),
-    collectCrates(fetchImpl, config),
+    collectCrates(fetchImpl, config, now),
     collectNpm(fetchImpl, config),
     collectSkills(fetchImpl, config),
     collectRybbit(fetchImpl, config.rybbit, now),
@@ -363,7 +389,7 @@ export function metricsResponse(metrics: Metrics): Response {
   // A skipped source (no token for releases) is configuration, not a failure.
   const states = Object.values(metrics.sources).filter((state) => state !== "skipped");
   const allFailed = states.every((state) => state === "error");
-  const partial = states.includes("error");
+  const partial = states.includes("error") || Object.values(metrics.crates).some((crate) => crate.downloads30Days.count === null);
   let cacheControl = "public, max-age=300, s-maxage=3600";
   if (partial) cacheControl = "public, max-age=60, s-maxage=300";
   if (allFailed) cacheControl = "no-store";

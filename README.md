@@ -5,8 +5,8 @@ latest releases, crates.io and npm versions and downloads — as **one small JSO
 served from a Bunny edge script and cached at the edge for an hour.
 
 Sites read one URL instead of calling GitHub, crates.io and npm from every
-visitor's browser. The registries see a handful of requests an hour, whatever
-the traffic, each identified by a User-Agent as crates.io asks.
+visitor's browser. The registries see bounded, cached collections instead of
+per-visitor requests, each identified by a User-Agent as crates.io asks.
 
 ## Dashboard
 
@@ -18,9 +18,9 @@ The OSS homepage shows a compact summary and links to the full directory.
 
 This repository owns the public aggregate API and the legacy GitHub Pages
 redirect. The browser receives only the public JSON; Rybbit credentials remain
-in the Bunny runtime. npm monthly downloads and crates.io lifetime downloads
-keep their separate time windows. The activity-proxy definition and coverage
-checks live alongside the dashboard.
+in the Bunny runtime. npm monthly downloads and crates.io 30-day downloads
+keep explicit time windows; crate lifetime and 90-day totals remain available.
+The activity-proxy definition and coverage checks live alongside the dashboard.
 
 `pnpm build:site` writes the redirect to `dist/site`, including a fallback link
 and canonical URL. `pnpm preview:site` serves it at
@@ -50,6 +50,11 @@ workflow-only and secret-only changes require a manual Bunny deployment.
       "version": "1.4.2",
       "downloads": 1746,
       "recentDownloads": 1300,
+      "downloads30Days": {
+        "start": "2026-08-25T00:00:00.000Z",
+        "end": "2026-09-24T00:00:00.000Z",
+        "count": 500
+      },
       "publishedAt": "2026-09-23T08:00:00Z",
       "repo": "ferroni"
     }
@@ -85,11 +90,35 @@ workflow-only and secret-only changes require a manual Bunny deployment.
   (`SKILLS_REPO`): one entry per `skills/<name>/SKILL.md` with the number of
   `references/*.md` files, plus the number of `instructions/*.md` packs. The
   counts come from one recursive tree request on the default branch.
-- **Five upstream requests** per refresh (GitHub pages add one each per 100
+- **Five base upstream requests** per refresh (GitHub pages add one each per 100
   repositories): GitHub `orgs/{org}/repos`, one GitHub GraphQL query for every
   repository's latest release, the skills repository's tree, crates.io `crates?user_id=`, npm
   `-/v1/search?text=maintainer:`. The npm search carries versions and monthly
   downloads for scoped packages too.
+- **crates.io 30-day downloads:** each crate also carries `downloads30Days`
+  with an inclusive `start`, exclusive `end`, and nullable `count`. The window
+  covers the last 30 complete UTC dates before `generatedAt`, excluding today's
+  partial activity. The count sums daily downloads from the
+  [crate downloads endpoint](https://github.com/rust-lang/crates.io/blob/main/src/controllers/krate/downloads.rs),
+  including both `version_downloads` (the newest five versions) and
+  `meta.extra_downloads` (all older versions). Missing zero-download dates add
+  nothing. Registry ingestion can lag behind actual downloads.
+  `downloads` still means lifetime downloads; `recentDownloads` still covers
+  crates.io's 90-day window. The new field is an additive schema-1 extension.
+  Failed or unattempted enrichment has `count: null`, preserving versions,
+  repository links, and existing totals. Consumers must keep an aggregate
+  unknown if any contributing crate has a null or absent count.
+- **Bounded crate requests:** metadata and daily-statistics requests are
+  serialized at least 1.1 seconds apart, following the
+  [crates.io data access policy](https://crates.io/data-access). At most 30
+  download lookups fit alongside the other bounded sources below Bunny's
+  50-subrequest limit. A failed lookup stops enrichment; a six-second request
+  timeout and 40-second collection deadline bound slow upstreams. Incomplete
+  enrichment shortens the response cache to five minutes. A cold collection
+  of the current 22 crates takes roughly 25 seconds; subsequent requests use
+  the existing edge cache, origin shield, and request coalescing. Browser
+  consumers should allow 45 seconds for a cold miss while retaining their
+  previous snapshot.
 - **Releases:** `github.<repo>.release` is the release GitHub marks "Latest"
   (no drafts, no prereleases), with `version` taken from the tag (`v0.3.0` and
   `ferrolex-v0.4.0` both give the plain version; a tag without semver is left
