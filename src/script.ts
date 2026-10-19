@@ -20,6 +20,7 @@ const config: Config = {
   cratesUserId: process.env.CRATES_USER_ID ?? "385008",
   npmMaintainer: process.env.NPM_MAINTAINER ?? "swernerx",
   userAgent: "oss-metrics (https://github.com/sebastian-software/oss-metrics)",
+  rybbit: { settings: process.env.RYBBIT_CONFIG, apiKey: process.env.RYBBIT_API_KEY },
 };
 
 const CORS_PREFLIGHT = {

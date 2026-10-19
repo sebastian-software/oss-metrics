@@ -44,6 +44,8 @@ jobs:
         env:
           BUNNY_API_KEY: ${{ secrets.BUNNY_API_KEY }}
           METRICS_GITHUB_TOKEN: ${{ secrets.METRICS_GITHUB_TOKEN }}
+          METRICS_RYBBIT_CONFIG: ${{ secrets.METRICS_RYBBIT_CONFIG }}
+          METRICS_RYBBIT_API_KEY: ${{ secrets.METRICS_RYBBIT_API_KEY }}
         run: node scripts/provision.ts
 
       - name: Publish the bundled script and purge the cache

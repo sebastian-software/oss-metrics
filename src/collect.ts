@@ -1,6 +1,6 @@
 /**
- * Collects the public metrics of every Sebastian Software project in three
- * upstream requests — one per source — and merges them into one small JSON
+ * Collects the public metrics of every Sebastian Software project from bounded
+ * upstream sources and merges them into one small JSON
  * document. Ownership is implicit: each source is queried by owner (GitHub
  * organization, crates.io user, npm maintainer), so nothing someone else
  * published under a similar name can appear.
@@ -8,6 +8,8 @@
  * Pure on purpose: it takes `fetch` as a parameter, so it runs unchanged in the
  * Bunny edge runtime and in `node --test`.
  */
+
+import { collectRybbit, type ProjectUsage, type RybbitSourceConfig } from "./rybbit.ts";
 
 export type Config = {
   /** GitHub organization whose projects are listed. */
@@ -30,6 +32,8 @@ export type Config = {
   npmMaintainer: string;
   /** Sent upstream: crates.io asks API clients to identify themselves. */
   userAgent: string;
+  /** Optional private analytics configuration; never serialized into public metrics. */
+  rybbit?: RybbitSourceConfig;
 };
 
 /**
@@ -60,7 +64,7 @@ export type PackageMetrics = {
   publishedAt: string;
   repo?: string;
 };
-/** `skipped`: the source needs a token and none is configured (releases). */
+/** `skipped`: an optional source has no credentials or runtime configuration. */
 export type SourceStatus = "error" | "ok" | "skipped";
 
 export type Metrics = {
@@ -72,11 +76,13 @@ export type Metrics = {
     crates: SourceStatus;
     npm: SourceStatus;
     skills: SourceStatus;
+    rybbit: SourceStatus;
   };
   github: Record<string, RepoMetrics>;
   crates: Record<string, CrateMetrics>;
   npm: Record<string, PackageMetrics>;
   skills: SkillsMetrics;
+  usage: Record<string, ProjectUsage>;
 };
 
 type Fetch = (input: string, init?: RequestInit) => Promise<Response>;
@@ -307,12 +313,13 @@ export async function collectMetrics(
   config: Config,
   now: Date = new Date(),
 ): Promise<Metrics> {
-  const [github, releases, crates, npm, skills] = await Promise.allSettled([
+  const [github, releases, crates, npm, skills, rybbit] = await Promise.allSettled([
     collectGithub(fetchImpl, config),
     config.githubToken ? collectReleases(fetchImpl, config) : Promise.resolve(null),
     collectCrates(fetchImpl, config),
     collectNpm(fetchImpl, config),
     collectSkills(fetchImpl, config),
+    collectRybbit(fetchImpl, config.rybbit, now),
   ]);
   const repos = github.status === "fulfilled" ? github.value : {};
   // Releases join the listed repositories only: the topic filter decides what a project is.
@@ -331,11 +338,13 @@ export async function collectMetrics(
       crates: crates.status === "fulfilled" ? "ok" : "error",
       npm: npm.status === "fulfilled" ? "ok" : "error",
       skills: skills.status === "fulfilled" ? "ok" : "error",
+      rybbit: rybbit.status === "rejected" ? "error" : rybbit.value === null ? "skipped" : "ok",
     },
     github: repos,
     crates: crates.status === "fulfilled" ? crates.value : {},
     npm: npm.status === "fulfilled" ? npm.value : {},
     skills: skills.status === "fulfilled" ? skills.value : { skills: {}, instructionPacks: 0 },
+    usage: rybbit.status === "fulfilled" && rybbit.value !== null ? rybbit.value : {},
   };
 }
 

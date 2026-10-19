@@ -17,6 +17,7 @@ const metrics = await collectMetrics(fetch, {
   cratesUserId: "385008",
   npmMaintainer: "swernerx",
   userAgent: "oss-metrics smoke (https://github.com/sebastian-software/oss-metrics)",
+  rybbit: { settings: process.env.RYBBIT_CONFIG, apiKey: process.env.RYBBIT_API_KEY },
 });
 const text = JSON.stringify(metrics);
 const response = metricsResponse(metrics);
