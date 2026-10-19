@@ -306,6 +306,45 @@ so the initial private configuration uses `retentionDays: null` and
 not complete the published-client observation or establish complete coverage.
 No raw events or provider identifiers are included in this evidence.
 
+### Production verification on October 19, 2026
+
+The source shipped in [PR #11](https://github.com/sebastian-software/oss-metrics/pull/11).
+The current production deployment is
+[`000db1f`](https://github.com/sebastian-software/oss-metrics/commit/000db1fe1aaa7564102f61769227cb7bd7cddafc),
+with successful [CI (39 tests)](https://github.com/sebastian-software/oss-metrics/actions/runs/39296436626)
+and [Bunny rollout and smoke checks](https://github.com/sebastian-software/oss-metrics/actions/runs/39296436694).
+The Rybbit collector is unchanged from the initial integration.
+
+The public snapshot collected at `2026-10-19T17:43:10.825Z` returned HTTP 200,
+`sources.rybbit: "ok"`, and CORS access for website consumers. An authenticated
+private aggregate recheck at `2026-10-19T17:45:17.925Z` matched both observed
+Palamedes totals in the table above: 31 for October 12–18 and 172 for
+September 19–October 18. The recheck used aggregate GET requests only.
+
+This verifies the deployed query-to-public-snapshot path, not historical
+completeness or a particular released client. Both windows still have
+`coverage: "unverified"`, `count: null`, and project `verified: false`.
+The public map contains only the allowlisted project and the documented
+aggregate, unit, timestamp, and coverage fields. Credentials, private origin,
+site configuration, raw properties, and visitor/session identifiers remain
+outside the public response.
+
+Two operational checks remain before a consumer can treat these as verified,
+complete-window measurements:
+
+1. Inspect the actual deployment's ClickHouse retention/deletion policy and
+   continuous-collection history. Rybbit 2.6.0's analytics API and website
+   settings do not establish either. An old retained event or a successful
+   current aggregate is not evidence of uninterrupted historical collection.
+2. Finish the published-client observation in
+   [Palamedes #1036](https://github.com/sebastian-software/palamedes/issues/1036).
+   Keep the clean-data cutoff and verification-traffic rule intact.
+
+[Issue #10](https://github.com/sebastian-software/oss-metrics/issues/10) remains
+open for these checks. [Palamedes #1277](https://github.com/sebastian-software/palamedes/issues/1277)
+can use the source contract and rollout evidence, but must preserve the
+unverified/partial/stale gates until the missing evidence is recorded.
+
 ## Which repositories are projects
 
 A repository is a project when it carries the GitHub topic `oss-project` —
