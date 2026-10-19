@@ -44,7 +44,7 @@ export type Config = {
  */
 export type ReleaseMetrics = { tag: string; version: string; publishedAt: string };
 /** `pushedAt` is the repository's last push, from which sites derive activity. */
-export type RepoMetrics = { stars: number; forks: number; language: string | null; pushedAt: string; release?: ReleaseMetrics };
+export type RepoMetrics = { stars: number; forks: number; language: string | null; coreLanguage?: string; pushedAt: string; release?: ReleaseMetrics };
 /** One agent skill: the number of focused references it routes to. */
 export type SkillMetrics = { references: number };
 export type SkillsMetrics = {
@@ -98,9 +98,18 @@ const MAX_PAGES = { github: 5, crates: 5 };
  * Per-platform binaries of a native package (`@palamedes/cli-linux-x64-gnu`):
  * implementation details of the package that depends on them, not projects.
  */
-const PLATFORM_BINARY = /-(?:android|darwin|freebsd|linux|wasm32|win32)(?:-|$)/u;
-const SCOPED_PLATFORM_BINARY = /(?:^|\/)(?:android|darwin|freebsd|linux|wasm32|win32)(?:-|$)/u;
+const PLATFORM_BINARY = /(?:^|[/-])(?:android|darwin|freebsd|linux|wasm32|win32)(?:-|$)/u;
 const NODE_BINDING_KEYWORDS = new Set(["napi", "napi-rs", "node-api", "n-api"]);
+/** Maintainer-declared core language takes precedence over GitHub's byte counts in consumers. */
+const CORE_LANGUAGES: Record<string, string> = {
+  "oss-language-rust": "Rust",
+  "oss-language-typescript": "TypeScript",
+  "oss-language-javascript": "JavaScript",
+  "oss-language-c": "C",
+  "oss-language-cpp": "C++",
+  "oss-language-python": "Python",
+  "oss-language-go": "Go",
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -153,7 +162,9 @@ export async function collectGithub(fetchImpl: Fetch, config: Config) {
       const forks = count(repo, "forks_count");
       const pushedAt = text(repo, "pushed_at");
       if (name && stars !== undefined && forks !== undefined && pushedAt) {
-        repos[name] = { stars, forks, language: text(repo, "language") ?? null, pushedAt };
+        const languages = topics.flatMap((topic: unknown) => typeof topic === "string" && Object.hasOwn(CORE_LANGUAGES, topic) ? [CORE_LANGUAGES[topic]] : []);
+        repos[name] = { stars, forks, language: text(repo, "language") ?? null,
+          ...(languages.length === 1 ? { coreLanguage: languages[0] } : {}), pushedAt };
       }
     }
     url = next;
@@ -299,7 +310,7 @@ export async function collectNpm(fetchImpl: Fetch, config: Config) {
         monthlyDownloads: monthlyDownloads ?? 0,
         publishedAt,
         ...(repo ? { repo } : {}),
-        ...(nodeBinding && !SCOPED_PLATFORM_BINARY.test(name) ? { nodeBinding: true as const } : {}),
+        ...(nodeBinding ? { nodeBinding: true as const } : {}),
       };
     }
   }
