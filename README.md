@@ -41,6 +41,7 @@ workflow-only and secret-only changes require a manual Bunny deployment.
     "ferroni": {
       "stars": 7,
       "forks": 1,
+      "language": "Rust",
       "pushedAt": "2026-09-24T19:00:00Z",
       "release": { "tag": "v1.5.1", "version": "1.5.1", "publishedAt": "2026-09-24T19:11:06Z" }
     }
@@ -86,6 +87,17 @@ workflow-only and secret-only changes require a manual Bunny deployment.
   an organization repository — join them to `github` through it.
   Ownership is implicit — each source is queried _by owner_, so a look-alike
   package somebody else published never appears.
+- **Project language and Node.js bindings:** `github.<repo>.language` is the
+  primary language reported by GitHub, or `null` when none is reported. It is
+  independent of package registries; a Rust crate does not imply that Rust is
+  the repository's primary language. npm packages with explicit `napi`,
+  `napi-rs`, `node-api`, or `n-api` keywords carry `nodeBinding: true`.
+  Platform artifacts are not marked as user-facing bindings. Ordinary CLI
+  launchers and generic `native`/`rust` keywords do not establish a binding.
+  Consumers join binding packages through their declared `repo` like other
+  packages. Missing `nodeBinding` means no explicit declaration was found,
+  rather than proof that native bindings do not exist. Both fields reuse the
+  existing metadata requests and are additive schema-1 extensions.
 - **Skills:** `skills` counts the agent skills of `skills.sebastian-software.com`
   (`SKILLS_REPO`): one entry per `skills/<name>/SKILL.md` with the number of
   `references/*.md` files, plus the number of `instructions/*.md` packs. The

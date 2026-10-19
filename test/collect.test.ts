@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { collectMetrics, type Config, metricsResponse, repoOf, versionOfTag } from "../src/collect.ts";
+import { collectMetrics, collectNpm, type Config, metricsResponse, repoOf, versionOfTag } from "../src/collect.ts";
 
 const config: Config = {
   githubOrg: "sebastian-software",
@@ -31,6 +31,7 @@ function upstream(
             stargazers_count: 7,
             forks_count: 1,
             pushed_at: "2026-09-24T08:00:00Z",
+            language: "Rust",
           },
           { name: "homebrew-tap", topics: [], stargazers_count: 0, forks_count: 0 },
           { name: "standards", topics: ["oss-project", "oss-exclude"], stargazers_count: 2, forks_count: 0 },
@@ -152,7 +153,8 @@ test("one document for the organization, including each crate's 30-day downloads
     ["ferromark", "ferroni"],
     "only opted-in repositories; blocked, archived and forks drop out even when tagged",
   );
-  assert.deepEqual(metrics.github.ferroni, { stars: 7, forks: 1, pushedAt: "2026-09-24T08:00:00Z" });
+  assert.deepEqual(metrics.github.ferroni, { stars: 7, forks: 1, language: "Rust", pushedAt: "2026-09-24T08:00:00Z" });
+  assert.equal(metrics.github.ferromark.language, null, "unknown primary language is not inferred from packages");
   assert.deepEqual(metrics.crates.ferroni, {
     version: "1.4.2",
     downloads: 1746,
@@ -171,6 +173,28 @@ test("one document for the organization, including each crate's 30-day downloads
   assert.equal(metrics.npm["@palamedes/cli-linux-x64-gnu"], undefined, "platform binaries are not projects");
   assert.equal(calls.length, 6, "github (2 pages), skills tree, crates, crate downloads, npm");
   assert.ok(calls.every((call) => call.headers["user-agent"] === "oss-metrics test"), "every call identifies itself");
+});
+
+test("native Node.js bindings require explicit npm metadata and exclude CLI launchers and platform artifacts", async () => {
+  const cases = [
+    { name: "@example/core-node", keywords: ["rust", "N-API"], binding: true },
+    { name: "@example/core", keywords: ["napi-rs"], binding: true },
+    { name: "native-example", keywords: ["node-api"], binding: true },
+    { name: "get-example", keywords: ["rust", "native", "cli", "nodejs"], binding: undefined },
+    { name: "@example/linux-x64-gnu", keywords: ["napi"], binding: undefined },
+    { name: "plain-example", keywords: null, binding: undefined },
+    { name: "bad-keyword-example", keywords: [42, {}, "bindings"], binding: undefined },
+  ];
+  const { calls, fetchImpl } = upstream({ npm: () => json({ objects: cases.map((item) => ({
+    package: { name: item.name, keywords: item.keywords, version: "1.0.0", date: "2026-09-24T08:00:00Z",
+      links: { repository: "https://github.com/sebastian-software/example" } }, downloads: { monthly: 100 },
+  })) }) });
+  const packages = await collectNpm(fetchImpl, config);
+  for (const item of cases) {
+    assert.equal(packages[item.name].nodeBinding, item.binding, item.name);
+    assert.equal(packages[item.name].repo, "example");
+  }
+  assert.equal(calls.length, 1, "classification reuses the existing maintainer search without extra requests");
 });
 
 test("a token goes to GitHub only", async () => {
