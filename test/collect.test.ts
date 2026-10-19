@@ -18,7 +18,7 @@ const json = (body: unknown, headers: Record<string, string> = {}) =>
 
 /** A fake upstream: one answer per source, recording every request it saw. */
 function upstream(
-  overrides: Partial<Record<"github" | "github2" | "releases" | "crates" | "npm" | "skills", () => Response>> = {},
+  overrides: Partial<Record<"github" | "github2" | "releases" | "crates" | "crateDownloads" | "npm" | "skills", () => Response>> = {},
 ) {
   const calls: { url: string; headers: Record<string, string> }[] = [];
   const answers = {
@@ -123,6 +123,7 @@ function upstream(
           },
         ],
       }),
+    crateDownloads: () => json({ version_downloads: [], meta: { extra_downloads: [] } }),
     ...overrides,
   };
   const fetchImpl = async (url: string, init?: RequestInit) => {
@@ -131,6 +132,7 @@ function upstream(
     if (url.includes("page=2") && url.includes("github")) return answers.github2();
     if (url.includes("/git/trees/")) return answers.skills();
     if (url.startsWith("https://api.github.com/")) return answers.github();
+    if (url.startsWith("https://crates.io/") && url.endsWith("/downloads")) return answers.crateDownloads();
     if (url.startsWith("https://crates.io/")) return answers.crates();
     if (url.startsWith("https://registry.npmjs.org/")) return answers.npm();
     throw new Error(`unexpected ${url}`);
@@ -138,7 +140,7 @@ function upstream(
   return { calls, fetchImpl };
 }
 
-test("one document for the whole organization, from one request per source (plus pages)", async () => {
+test("one document for the organization, including each crate's 30-day downloads", async () => {
   const { calls, fetchImpl } = upstream();
   const metrics = await collectMetrics(fetchImpl, config, new Date("2026-09-24T10:00:00.123Z"));
 
@@ -155,6 +157,7 @@ test("one document for the whole organization, from one request per source (plus
     version: "1.4.2",
     downloads: 1746,
     recentDownloads: 1300,
+    downloads30Days: { start: "2026-08-25T00:00:00.000Z", end: "2026-09-24T00:00:00.000Z", count: 0 },
     publishedAt: "2026-09-23T08:00:00Z",
     repo: "ferroni",
   });
@@ -166,7 +169,7 @@ test("one document for the whole organization, from one request per source (plus
   });
   assert.equal(metrics.npm.ferromark?.repo, undefined, "a repository outside the org is not linked");
   assert.equal(metrics.npm["@palamedes/cli-linux-x64-gnu"], undefined, "platform binaries are not projects");
-  assert.equal(calls.length, 5, "github (2 pages), skills tree, crates, npm");
+  assert.equal(calls.length, 6, "github (2 pages), skills tree, crates, crate downloads, npm");
   assert.ok(calls.every((call) => call.headers["user-agent"] === "oss-metrics test"), "every call identifies itself");
 });
 
