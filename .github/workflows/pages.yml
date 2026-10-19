@@ -1,4 +1,4 @@
-name: Publish dashboard to GitHub Pages
+name: Publish dashboard redirect to GitHub Pages
 
 on:
   push:
