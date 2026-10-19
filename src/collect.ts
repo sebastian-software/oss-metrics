@@ -44,7 +44,7 @@ export type Config = {
  */
 export type ReleaseMetrics = { tag: string; version: string; publishedAt: string };
 /** `pushedAt` is the repository's last push, from which sites derive activity. */
-export type RepoMetrics = { stars: number; forks: number; pushedAt: string; release?: ReleaseMetrics };
+export type RepoMetrics = { stars: number; forks: number; language: string | null; pushedAt: string; release?: ReleaseMetrics };
 /** One agent skill: the number of focused references it routes to. */
 export type SkillMetrics = { references: number };
 export type SkillsMetrics = {
@@ -65,6 +65,8 @@ export type PackageMetrics = {
   monthlyDownloads: number;
   publishedAt: string;
   repo?: string;
+  /** Present only when npm keywords explicitly identify a native Node.js binding. */
+  nodeBinding?: true;
 };
 /** `skipped`: an optional source has no credentials or runtime configuration. */
 export type SourceStatus = "error" | "ok" | "skipped";
@@ -97,6 +99,8 @@ const MAX_PAGES = { github: 5, crates: 5 };
  * implementation details of the package that depends on them, not projects.
  */
 const PLATFORM_BINARY = /-(?:android|darwin|freebsd|linux|wasm32|win32)(?:-|$)/u;
+const SCOPED_PLATFORM_BINARY = /(?:^|\/)(?:android|darwin|freebsd|linux|wasm32|win32)(?:-|$)/u;
+const NODE_BINDING_KEYWORDS = new Set(["napi", "napi-rs", "node-api", "n-api"]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -149,7 +153,7 @@ export async function collectGithub(fetchImpl: Fetch, config: Config) {
       const forks = count(repo, "forks_count");
       const pushedAt = text(repo, "pushed_at");
       if (name && stars !== undefined && forks !== undefined && pushedAt) {
-        repos[name] = { stars, forks, pushedAt };
+        repos[name] = { stars, forks, language: text(repo, "language") ?? null, pushedAt };
       }
     }
     url = next;
@@ -286,12 +290,16 @@ export async function collectNpm(fetchImpl: Fetch, config: Config) {
     const publishedAt = text(entry.package, "date");
     const links = isRecord(entry.package.links) ? entry.package.links : {};
     const repo = repoOf(links.repository, config.githubOrg);
+    const nodeBinding = Array.isArray(entry.package.keywords) && entry.package.keywords.some(
+      (keyword: unknown) => typeof keyword === "string" && NODE_BINDING_KEYWORDS.has(keyword.trim().toLowerCase()),
+    );
     if (name && version && publishedAt && !PLATFORM_BINARY.test(name)) {
       packages[name] = {
         version,
         monthlyDownloads: monthlyDownloads ?? 0,
         publishedAt,
         ...(repo ? { repo } : {}),
+        ...(nodeBinding && !SCOPED_PLATFORM_BINARY.test(name) ? { nodeBinding: true as const } : {}),
       };
     }
   }
