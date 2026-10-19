@@ -1,5 +1,5 @@
-# Provisions the Bunny hosting and rolls out the edge script, on every push to
-# main and on demand. Idempotent: an unchanged account stays unchanged.
+# Provisions Bunny and rolls out the edge script on API changes to main and on
+# demand. The dashboard has its own Pages workflow. Unchanged hosting stays unchanged.
 #
 # BUNNY_API_KEY comes from the shared GitHub organization Actions secret.
 # No private action, install token or local plaintext credential file is needed.
@@ -8,6 +8,16 @@ name: Deploy to Bunny
 on:
   push:
     branches: [main]
+    # Website-only changes publish to Pages without rolling out the API.
+    paths:
+      - 'src/**'
+      - 'types/**'
+      - 'scripts/build.ts'
+      - 'scripts/bunny.ts'
+      - 'scripts/provision.ts'
+      - 'scripts/publish.ts'
+      - 'scripts/verify.ts'
+      - 'pnpm-lock.yaml'
   workflow_dispatch:
 
 permissions:

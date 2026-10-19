@@ -14,5 +14,5 @@
       "@bunny.net/edgescript-sdk": ["./types/edgescript-sdk.d.ts"]
     }
   },
-  "include": ["src", "test", "scripts", "types"]
+  "include": ["src", "site", "test", "scripts", "types"]
 }

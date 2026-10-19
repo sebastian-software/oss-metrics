@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#173653">
+  <meta name="description" content="A public view of Sebastian Software's open-source projects, releases, packages, and metrics sources.">
+  <title>OSS Metrics — Sebastian Software</title>
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./app.css">
+  <script type="module" src="./app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="brand" href="./" aria-label="OSS Metrics home">
+        <svg aria-hidden="true" viewBox="0 0 32 32"><path d="M4 23V12h6v11zm9 0V5h6v18zm9 0v-8h6v8z" fill="currentColor"/></svg>
+        <span>OSS Metrics</span>
+      </a>
+      <nav aria-label="Main">
+        <a href="#projects">Projects</a><a href="#packages">Packages</a><a href="#sources">Sources</a>
+      </nav>
+      <a class="header-repo" href="https://github.com/sebastian-software/oss-metrics">View repository <span aria-hidden="true">↗</span></a>
+    </div>
+  </header>
+  <main id="main" class="page" tabindex="-1">
+    <section class="intro" aria-labelledby="page-title">
+      <div><p class="owner">Sebastian Software</p><h1 id="page-title">Open-source overview</h1>
+        <p class="lede">Projects, packages, and the numbers behind them. One public snapshot.</p></div>
+      <div class="refresh-area">
+        <button id="refresh" type="button"><svg aria-hidden="true" viewBox="0 0 20 20"><path d="M16 6V2m0 4h-4M16 6a7 7 0 1 0 1 7"/></svg><span>Refresh data</span></button>
+        <p id="snapshot-age" role="status">Loading snapshot…</p>
+      </div>
+    </section>
+    <p id="notice" class="notice" role="status" hidden></p>
+    <div id="error" class="error-message" role="alert" hidden></div>
+    <noscript><p class="notice">JavaScript is needed to display the live metrics. You can <a href="https://metrics.sebastian-software.com/v1/metrics.json">read the JSON snapshot</a> directly.</p></noscript>
+    <section class="overview" aria-label="Portfolio totals" aria-busy="true" id="overview">
+      <div class="overview-lead"><span class="metric-label">Public projects</span><strong id="total-projects">—</strong><span class="metric-note">Opted in on GitHub</span></div>
+      <div><span class="metric-label">GitHub stars</span><strong id="total-stars">—</strong><span class="metric-note">Across listed projects</span></div>
+      <div><span class="metric-label">npm downloads</span><strong id="total-npm">—</strong><span class="metric-note">Monthly, all packages</span></div>
+      <div><span class="metric-label">crates.io downloads</span><strong id="total-crates">—</strong><span class="metric-note">All time, all crates</span></div>
+    </section>
+    <div class="content-layout">
+      <div class="main-column">
+        <section id="projects" class="panel" aria-labelledby="projects-title" aria-busy="true">
+          <div class="section-heading"><div><h2 id="projects-title">Project directory <span id="project-total" class="count-badge">—</span></h2><p>Find a project or open its package details.</p></div></div>
+          <div class="project-tools">
+            <div class="search-field"><label for="project-search">Find a project</label><input id="project-search" type="search" placeholder="Search projects or package names" autocomplete="off"></div>
+            <div><label for="project-filter">Registry</label><select id="project-filter"><option value="all">All projects</option><option value="npm">npm</option><option value="crates">crates.io</option><option value="github">GitHub only</option></select></div>
+            <div><label for="project-sort">Sort by</label><select id="project-sort"><option value="stars">Most stars</option><option value="activity">Latest push</option><option value="name">Name</option></select></div>
+          </div>
+          <p id="project-results" class="result-count" role="status">Waiting for project data</p>
+          <table class="project-table">
+            <caption class="sr-only">Public projects, releases, stars, downloads, and last push</caption>
+            <thead><tr><th scope="col" id="project-name-heading">Project</th><th scope="col" class="col-release">Latest version</th><th scope="col" class="numeric" id="stars-heading" aria-sort="descending">Stars</th><th scope="col" class="col-downloads numeric">Downloads</th><th scope="col" class="usage-column numeric" hidden><a href="#usage-note">Active users*</a></th><th scope="col" class="col-push" id="push-heading">Last push</th></tr></thead>
+            <tbody id="project-rows"></tbody>
+          </table>
+          <div class="empty-state" id="projects-empty"><span class="loading-mark" aria-hidden="true"></span><p>Loading the public project snapshot…</p></div>
+        </section>
+        <section id="packages" class="panel package-panel" aria-labelledby="packages-title" aria-busy="true">
+          <div class="section-heading"><div><h2 id="packages-title">Package directory <span id="package-total" class="count-badge">—</span></h2><p>Every published package, including packages without a listed project.</p></div></div>
+          <div class="package-tools"><div class="search-field"><label for="package-search">Find a package</label><input id="package-search" type="search" placeholder="Search packages" autocomplete="off"></div><div><label for="package-registry">Registry</label><select id="package-registry"><option value="npm">npm</option><option value="crates">crates.io</option></select></div></div>
+          <p id="package-results" class="result-count" role="status">Waiting for package data</p>
+          <table class="package-table"><caption class="sr-only">Package versions, download counts, and publication dates</caption><thead><tr><th scope="col">Package</th><th scope="col" class="package-version">Version</th><th scope="col" class="numeric" id="package-downloads-heading">Monthly downloads</th><th scope="col" class="package-published">Published</th></tr></thead><tbody id="package-rows"></tbody></table>
+          <div class="empty-state" id="packages-empty" hidden><p>No matching packages.</p></div>
+          <div class="pagination"><p id="package-page">—</p><div><button type="button" id="package-prev" disabled>Previous</button><button type="button" id="package-next" disabled>Next</button></div></div>
+        </section>
+        <section class="panel skills-panel" aria-labelledby="skills-title" aria-busy="true" id="skills-section">
+          <div class="section-heading"><div><h2 id="skills-title">Agent skills <span id="skill-total" class="count-badge">—</span></h2><p>Focused instructions from the public skills collection.</p></div><a href="https://skills.sebastian-software.com">Browse skills <span aria-hidden="true">↗</span></a></div>
+          <ul id="skill-list" class="skill-list"></ul><p class="skills-footer" id="instruction-packs">Loading instruction packs…</p>
+        </section>
+      </div>
+      <aside class="side-column">
+        <section class="source-panel" id="sources" aria-labelledby="sources-title"><div class="source-heading"><span class="connection-mark" aria-hidden="true"></span><h2 id="sources-title">Data sources</h2></div><p class="source-intro">Collected at the edge, shared with everyone.</p><ul id="source-list" class="source-list"></ul><a class="json-link" href="https://metrics.sebastian-software.com/v1/metrics.json">Open JSON snapshot <span aria-hidden="true">↗</span></a></section>
+        <section class="about-panel" aria-labelledby="about-title"><h2 id="about-title">A snapshot, not a scoreboard.</h2><p>Stars, downloads, and activity describe different things. Each number keeps its source and its time window.</p><p>Only public projects with the <code>oss-project</code> topic appear here.</p><a href="https://github.com/sebastian-software/oss-metrics#endpoint">How the data is collected</a></section>
+      </aside>
+    </div>
+    <section class="methodology" aria-labelledby="notes-title"><h2 id="notes-title">Reading the numbers</h2><div><p><strong>Downloads.</strong> npm counts are monthly. crates.io totals are all time; recent counts are available in project details. The overview includes all packages, even those without a listed project.</p><p><strong>Freshness.</strong> The API is normally cached for an hour at the edge. Refreshing checks the endpoint again; it does not force a new upstream collection. Unavailable sources show a state instead of zero.</p><p id="usage-note"><strong>* Active users.</strong> An activity proxy based on update-check requests over 30 complete UTC days, including CI and repeat checks. The count is not deduplicated people or installations. Unverified, incomplete, or stale usage is labeled instead of shown as a user count.</p><p id="privacy-note"><strong>Privacy and hosting.</strong> This page loads static files from GitHub Pages and the public JSON snapshot from our Bunny-hosted metrics endpoint. It uses no page analytics, cookies, external fonts, or browser storage.</p></div></section>
+  </main>
+  <footer class="site-footer"><div><span>OSS Metrics by Sebastian Software</span><span>Public data. No page analytics, cookies, or browser storage.</span></div><nav aria-label="Footer"><a href="#privacy-note">Privacy and hosting</a><a href="https://sebastian-software.de/imprint">Legal notice</a><a href="https://github.com/sebastian-software/oss-metrics">Source on GitHub</a></nav></footer>
+</body>
+</html>

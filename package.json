@@ -11,9 +11,11 @@
   },
   "scripts": {
     "build": "node scripts/build.ts",
+    "build:site": "node scripts/build-site.ts",
+    "preview:site": "pnpm build:site && node scripts/preview-site.ts",
     "test": "node --test test/*.test.ts",
     "typecheck": "tsc --noEmit",
-    "check": "pnpm typecheck && pnpm test && pnpm build",
+    "check": "pnpm typecheck && pnpm test && pnpm build && pnpm build:site",
     "smoke": "node scripts/smoke.ts",
     "provision": "node scripts/provision.ts",
     "verify": "node scripts/verify.ts"
