@@ -10,35 +10,23 @@ the traffic, each identified by a User-Agent as crates.io asks.
 
 ## Dashboard
 
-The static dashboard shows the current public snapshot with searchable projects,
-package details, registry filters, sorting, and source status. npm monthly
-downloads and crates.io lifetime downloads keep their separate time windows.
-Optional CLI activity appears as **Active users\*** only when verification,
-coverage, and freshness allow it, with the update-check definition beside it.
+The live dashboard is part of the [Open Source website](https://oss.sebastian-software.com/metrics),
+with a [German version](https://oss.sebastian-software.de/metrics). Its source,
+Sebastian theme, translations, build snapshot, and live refresh behavior live in
+[`sebastian-websites/apps/opensource`](https://github.com/sebastian-software/sebastian-websites/tree/main/apps/opensource).
+The OSS homepage shows a compact summary and links to the full directory.
 
-The browser only requests the public metrics endpoint. It receives no API keys
-and makes no direct registry or Rybbit requests. The page uses no analytics,
-cookies, browser storage, or external fonts. If a refresh fails, the last
-successful snapshot and its collection time remain visible.
+This repository owns the public aggregate API and the legacy GitHub Pages
+redirect. The browser receives only the public JSON; Rybbit credentials remain
+in the Bunny runtime. npm monthly downloads and crates.io lifetime downloads
+keep their separate time windows. The activity-proxy definition and coverage
+checks live alongside the dashboard.
 
-```sh
-pnpm preview:site  # http://127.0.0.1:4173/oss-metrics/
-pnpm build:site    # static files in dist/site
-```
-
-`pnpm check` validates and builds both the API and dashboard. The dashboard uses
-TypeScript and the existing esbuild dependency, with relative asset URLs for
-the GitHub Pages project path.
-
-Set the repository's **Settings → Pages → Source** to **GitHub Actions**.
-`.github/workflows/pages.yml` builds and publishes dashboard changes on `main`,
-or on manual dispatch from `main`, using OIDC and the `github-pages` environment.
-The project URL is <https://sebastian-software.github.io/oss-metrics/>.
-
-Pages and Bunny publish independently. Website-only changes do not trigger the
-Bunny deployment. Changes to API sources, types, runtime scripts, or the lockfile
-do; workflow-only and secret-only changes need a manual Bunny deployment. The
-dashboard also supports snapshots without the optional Rybbit integration.
+`pnpm build:site` writes the redirect to `dist/site`, including a fallback link
+and canonical URL. `pnpm preview:site` serves it at
+`http://127.0.0.1:4173/oss-metrics/`. The Pages workflow publishes it independently
+of Bunny. API source, type, runtime-script, or lockfile changes trigger Bunny;
+workflow-only and secret-only changes require a manual Bunny deployment.
 
 ## Endpoint
 
