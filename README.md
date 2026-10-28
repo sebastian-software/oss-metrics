@@ -387,7 +387,7 @@ Everything on Bunny is code in this repository and converges on every push to
    its pull zone `sebastian-oss-metrics`; sets the script's variables and its
    optional `GITHUB_TOKEN` secret; pull zone caching (query strings ignored, Origin
    Shield, request coalescing, stale-while-updating); the edge rule that caches
-   `/v1/` for an hour; the hostname `metrics.sebastian-software.com` with its free
+   `/v1/metrics.json` for an hour; the hostname `metrics.sebastian-software.com` with its free
    certificate and forced HTTPS. Stateless and idempotent: resources are looked
    up by name, settings written only when they differ — a second run changes
    no infrastructure settings. Variables and secrets are idempotent upserts on
@@ -444,6 +444,34 @@ hosting configuration; it publishes the bundle and purges the cache.
 Bunny bills $1 a month minimum per account; at tens of thousands of page views
 this service stays well inside it (bandwidth well under a gigabyte, Edge
 Scripting $0.20 per million requests — mostly served from cache).
+
+## Screened app-usage observations
+
+`GET /v1/app-usage.json` adapts app-tracking's fixed public monthly projection.
+It stays separate from the cached registry and Rybbit metrics document. It
+requires no database, maintainer-login, or reporting credentials. The source
+and this response both use `no-store`; provisioning narrows the existing CDN
+cache rule to `/v1/metrics.json`, excluding usage. Deployment purges old cached
+responses. No prior snapshot is retained or served during an outage.
+
+A disabled upstream returns 404 `not_enabled`; an unavailable, stale, malformed,
+or unreviewed schema returns 503 `source_unavailable`. Neither means zero
+usage. Successful responses preserve explicit unavailable months as null and
+include the source snapshot time. Replace the whole snapshot on refresh and
+clear its display on failure, withdrawal, or expiry; do not append old totals
+or use a service-worker/offline cache for this route.
+
+The unit is **reported observations**, rounded down to multiples of ten, over
+complete UTC months. CLI invocations, verified resource downloads, and language
+use are different measures. Legacy and generic streams, and local and CI modes,
+remain separate. Do not add streams, infer people/physical devices, or relabel
+these counts as registry downloads, update checks, or Rybbit visitors.
+Installation/project IDs and unique counts, commands, versions, and system
+breakdowns are excluded. Unknown upstream fields are dropped by reconstruction.
+
+The app-tracking publication gate remains independent and disabled pending its
+concrete disclosure assessment. Shipping this adapter does not activate it.
+See [the source contract](https://github.com/sebastian-software/app-tracking/blob/main/docs/monthly-history.md).
 
 ## License
 

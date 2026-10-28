@@ -9,6 +9,7 @@
  */
 import * as BunnySDK from "@bunny.net/edgescript-sdk";
 
+import { handleAppUsage } from "./app-tracking.ts";
 import { collectMetrics, type Config, metricsResponse } from "./collect.ts";
 
 const config: Config = {
@@ -30,7 +31,9 @@ const CORS_PREFLIGHT = {
 };
 
 BunnySDK.net.http.serve(async (request: Request) => {
-  const { pathname } = new URL(request.url);
+  const url = new URL(request.url);
+  const { pathname } = url;
+  if (pathname === "/v1/app-usage.json") return handleAppUsage(request, fetch);
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS_PREFLIGHT });
   if (request.method !== "GET") return new Response("Method not allowed", { status: 405 });
   if (pathname === "/v1/metrics.json") return metricsResponse(await collectMetrics(fetch, config));

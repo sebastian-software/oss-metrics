@@ -7,6 +7,8 @@
  *   node scripts/verify.ts https://sebastian-oss-metrics.b-cdn.net [https://metrics.sebastian-software.com]
  */
 
+import { checkedAppUsage } from "../src/app-tracking.ts";
+
 const PATH = "/v1/metrics.json";
 const ATTEMPTS = 8;
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -41,11 +43,26 @@ export async function verify(base: string): Promise<void> {
       if (last.skipped?.length) {
         console.log(`::notice::${base}: skipped optional sources (${last.skipped.join(", ")}); see the README for configuration.`);
       }
+      await verifyAppUsage(base);
       return;
     }
     await pause(attempt * 1000);
   }
   throw new Error(`${base}${PATH} ${last.ok ? "never came from the cache" : `is unhealthy: ${last.reason}`}`);
+}
+
+/** Never print usage, upstream errors, credentials, or provider details. */
+export async function verifyAppUsage(base: string): Promise<void> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const response = await fetch(base + "/v1/app-usage.json", { headers: { accept: "application/json" }, signal: AbortSignal.timeout(6000), redirect: "error" });
+    if (response.headers.get("cache-control") !== "no-store" || response.headers.get("cdn-cache")?.toUpperCase() === "HIT" ||
+        response.headers.get("access-control-allow-origin") !== "*") throw new Error("App-usage cache isolation failed");
+    const body: unknown = await response.json();
+    if (response.status === 200) checkedAppUsage(body);
+    else if (response.status !== 404 || !body || typeof body !== "object" || !("error" in body) || body.error !== "not_enabled")
+      throw new Error("App-usage endpoint unavailable");
+  }
+  console.log("App-usage contract and uncached responses verified; no statistics logged.");
 }
 
 if (import.meta.main) {

@@ -192,3 +192,16 @@ test("analytics secrets are validated, passed only as runtime secrets, and never
     METRICS_RYBBIT_CONFIG: 'private-value', METRICS_RYBBIT_API_KEY: "private-value",
   }), { message: "Invalid Rybbit configuration" });
 });
+
+test("the previous wildcard cache rule is narrowed in place before publishing usage", async () => {
+  const bunny = fakeBunny({ dnsReady: true });
+  const previous = structuredClone(DESIRED);
+  previous.edgeRules[0].Triggers[0].PatternMatches = ["*/v1/*"];
+  await provision(bunny.api, previous, {});
+  const guid = bunny.state.pullZone.EdgeRules[0].Guid;
+  const result = await provision(bunny.api, DESIRED, {});
+  assert.deepEqual(result.changes, ['updated edge rule "oss-metrics: cache /v1/ for an hour"']);
+  assert.equal(bunny.state.pullZone.EdgeRules.length, 1);
+  assert.equal(bunny.state.pullZone.EdgeRules[0].Guid, guid);
+  assert.deepEqual(bunny.state.pullZone.EdgeRules[0].Triggers, DESIRED.edgeRules[0].Triggers);
+});
