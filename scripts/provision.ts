@@ -45,6 +45,11 @@ export const DESIRED = {
   pullZone: {
     // The endpoint takes no query: a random query string must not bypass the cache.
     IgnoreQueryStrings: true,
+    // Preserve origin no-store on the separate usage response, including 404s.
+    CacheControlMaxAgeOverride: -1,
+    CacheControlPublicMaxAgeOverride: -1,
+    CacheErrorResponses: false,
+    EnableSmartCache: false,
     EnableOriginShield: true,
     OriginShieldZoneCode: "FR",
     EnableRequestCoalescing: true,

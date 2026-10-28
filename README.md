@@ -452,7 +452,9 @@ It stays separate from the cached registry and Rybbit metrics document. It
 requires no database, maintainer-login, or reporting credentials. The source
 and this response both use `no-store`; provisioning narrows the existing CDN
 cache rule to `/v1/metrics.json`, excluding usage. Deployment purges old cached
-responses. No prior snapshot is retained or served during an outage.
+responses. Pull-zone TTL overrides and negative caching are disabled so origin
+`no-store` also survives on 404s. No prior snapshot is retained or served during
+an outage.
 
 A disabled upstream returns 404 `not_enabled`; an unavailable, stale, malformed,
 or unreviewed schema returns 503 `source_unavailable`. Neither means zero

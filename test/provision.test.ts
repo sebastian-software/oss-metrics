@@ -102,6 +102,10 @@ test("an empty account converges on the full hosting", async () => {
   assert.equal(bunny.state.secrets.get("GITHUB_TOKEN"), "ghp_secret");
   assert.equal(bunny.state.pullZone.IgnoreQueryStrings, true);
   assert.equal(bunny.state.pullZone.EnableOriginShield, true);
+  assert.equal(bunny.state.pullZone.CacheControlMaxAgeOverride, -1);
+  assert.equal(bunny.state.pullZone.CacheControlPublicMaxAgeOverride, -1);
+  assert.equal(bunny.state.pullZone.CacheErrorResponses, false);
+  assert.equal(bunny.state.pullZone.EnableSmartCache, false);
   assert.equal(bunny.state.pullZone.EdgeRules.length, 1);
   assert.equal(bunny.state.pullZone.EdgeRules[0].ActionParameter1, "3600");
   assert.deepEqual(bunny.state.pullZone.Hostnames, [
