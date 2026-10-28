@@ -54,6 +54,8 @@ export const DESIRED = {
     {
       // Standalone scripts run after the cache, and Bunny's smart cache does not
       // cache JSON on its own: this rule is what makes the document cached.
+      // Keep the existing description to update its Guid in place.
+      // Usage is deliberately excluded from this former wildcard rule.
       Description: "oss-metrics: cache /v1/ for an hour",
       Enabled: true,
       ActionType: 3, // OverrideCacheTime
@@ -62,7 +64,7 @@ export const DESIRED = {
       ActionParameter3: "",
       ExtraActions: [],
       TriggerMatchingType: 0, // MatchAny
-      Triggers: [{ Type: 0, PatternMatchingType: 0, PatternMatches: ["*/v1/*"] }], // Url, MatchAny
+      Triggers: [{ Type: 0, PatternMatchingType: 0, PatternMatches: ["*/v1/metrics.json", "*/v1/metrics.json?*"] }], // Url, MatchAny
     },
   ],
 };
