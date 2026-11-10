@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "unit": "reported_observations",
+  "window": "complete_utc_months",
+  "count_rounding": 10,
+  "snapshot_at": "2026-12-08T12:00:00.000Z",
+  "series": [
+    {
+      "month": "2026-11-01",
+      "tool_id": "ardo",
+      "stream": "events",
+      "metric": "cli.invocation",
+      "mode": "local",
+      "state": "unavailable",
+      "count": null
+    },
+    {
+      "month": "2026-11-01",
+      "tool_id": "dalo",
+      "stream": "legacy",
+      "metric": "cli.invocation",
+      "mode": "local",
+      "state": "unavailable",
+      "count": null
+    },
+    {
+      "month": "2026-11-01",
+      "tool_id": "dalo",
+      "stream": "events",
+      "metric": "cli.invocation",
+      "mode": "local",
+      "state": "unavailable",
+      "count": null
+    },
+    {
+      "month": "2026-11-01",
+      "tool_id": "palamedes",
+      "stream": "legacy",
+      "metric": "cli.invocation",
+      "mode": "local",
+      "state": "unavailable",
+      "count": null
+    },
+    {
+      "month": "2026-11-01",
+      "tool_id": "palamedes",
+      "stream": "events",
+      "metric": "cli.invocation",
+      "mode": "local",
+      "state": "unavailable",
+      "count": null
+    },
+    {
+      "month": "2026-11-01",
+      "tool_id": "ferriki",
+      "stream": "events",
+      "metric": "resource.download",
+      "mode": "local",
+      "state": "unavailable",
+      "count": null
+    },
+    {
+      "month": "2026-11-01",
+      "tool_id": "ferriki",
+      "stream": "events",
+      "metric": "language.use",
+      "mode": "local",
+      "state": "unavailable",
+      "count": null
+    }
+  ]
+}
