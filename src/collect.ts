@@ -93,6 +93,47 @@ type Fetch = (input: string, init?: RequestInit) => Promise<Response>;
 
 /** Upper bounds on pagination, so one request never exceeds the edge's subrequest budget. */
 const MAX_PAGES = { github: 5, crates: 5 };
+/** One budget per source, shared by all of its headers, body reads, and pages. */
+const SOURCE_BUDGET_MS = 10_000;
+
+function beforeAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    signal.addEventListener("abort", abort, { once: true });
+    promise.then(
+      (value) => { signal.removeEventListener("abort", abort); resolve(value); },
+      (error: unknown) => { signal.removeEventListener("abort", abort); reject(error); },
+    );
+    if (signal.aborted) { signal.removeEventListener("abort", abort); abort(); }
+  });
+}
+
+async function readJson(response: Response, signal: AbortSignal): Promise<unknown> {
+  if (signal.aborted) {
+    void response.body?.cancel().catch(() => {});
+    signal.throwIfAborted();
+  }
+  if (!response.body) throw new Error("Upstream answered without a body");
+  const reader = response.body.getReader();
+  const abort = () => { void reader.cancel().catch(() => {}); };
+  signal.addEventListener("abort", abort, { once: true });
+  const decoder = new TextDecoder();
+  let content = "";
+  try {
+    for (;;) {
+      signal.throwIfAborted();
+      const part = await beforeAbort(reader.read(), signal);
+      signal.throwIfAborted();
+      if (part.done) break;
+      content += decoder.decode(part.value, { stream: true });
+    }
+    return JSON.parse(content + decoder.decode());
+  } finally {
+    signal.removeEventListener("abort", abort);
+    void reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
+}
 
 /**
  * Per-platform binaries of a native package (`@palamedes/cli-linux-x64-gnu`):
@@ -137,22 +178,37 @@ async function getJson(
   fetchImpl: Fetch,
   url: string,
   headers: Record<string, string>,
+  signal: AbortSignal,
+  init: RequestInit = {},
 ): Promise<{ body: unknown; next?: string }> {
-  const response = await fetchImpl(url, { headers: { accept: "application/json", ...headers } });
-  if (!response.ok) throw new Error(`${url} answered ${response.status}`);
+  signal.throwIfAborted();
+  const pending = fetchImpl(url, { ...init, signal, headers: { accept: "application/json", ...headers } })
+    .then((response) => {
+      if (signal.aborted) {
+        void response.body?.cancel().catch(() => {});
+        signal.throwIfAborted();
+      }
+      return response;
+    });
+  const response = await beforeAbort(pending, signal);
+  if (!response.ok) {
+    void response.body?.cancel().catch(() => {});
+    throw new Error(`${url} answered ${response.status}`);
+  }
   // GitHub paginates with a Link header; crates.io carries the next page in the body.
   const next = /<([^>]+)>;\s*rel="next"/u.exec(response.headers.get("link") ?? "")?.[1];
-  return { body: await response.json(), next };
+  return { body: await readJson(response, signal), next };
 }
 
 export async function collectGithub(fetchImpl: Fetch, config: Config) {
+  const signal = AbortSignal.timeout(SOURCE_BUDGET_MS);
   const headers: Record<string, string> = { "user-agent": config.userAgent };
   if (config.githubToken) headers.authorization = `Bearer ${config.githubToken}`;
   const repos: Record<string, RepoMetrics> = {};
   let url: string | undefined =
     `https://api.github.com/orgs/${encodeURIComponent(config.githubOrg)}/repos?type=public&per_page=100`;
   for (let page = 0; url !== undefined && page < MAX_PAGES.github; page += 1) {
-    const { body, next }: { body: unknown; next?: string } = await getJson(fetchImpl, url, headers);
+    const { body, next }: { body: unknown; next?: string } = await getJson(fetchImpl, url, headers, signal);
     for (const repo of Array.isArray(body) ? (body as unknown[]) : []) {
       if (!isRecord(repo) || repo.archived === true || repo.fork === true) continue;
       const topics = Array.isArray(repo.topics) ? repo.topics : [];
@@ -193,21 +249,18 @@ const RELEASES_QUERY = `query($org: String!, $cursor: String) {
  * version a repository that publishes to no registry has (a Git-only tool).
  */
 export async function collectReleases(fetchImpl: Fetch, config: Config) {
+  const signal = AbortSignal.timeout(SOURCE_BUDGET_MS);
   const releases: Record<string, ReleaseMetrics> = {};
   let cursor: string | null = null;
   for (let page = 0; page < MAX_PAGES.github; page += 1) {
-    const response = await fetchImpl("https://api.github.com/graphql", {
+    const { body } = await getJson(fetchImpl, "https://api.github.com/graphql", {
+      authorization: `Bearer ${config.githubToken}`,
+      "content-type": "application/json",
+      "user-agent": config.userAgent,
+    }, signal, {
       method: "POST",
-      headers: {
-        accept: "application/json",
-        authorization: `Bearer ${config.githubToken}`,
-        "content-type": "application/json",
-        "user-agent": config.userAgent,
-      },
       body: JSON.stringify({ query: RELEASES_QUERY, variables: { org: config.githubOrg, cursor } }),
     });
-    if (!response.ok) throw new Error(`GitHub GraphQL answered ${response.status}`);
-    const body: unknown = await response.json();
     const repositories = releasesPage(body);
     for (const node of repositories.nodes) addRelease(releases, node);
     if (!repositories.hasNextPage) break;
@@ -246,16 +299,17 @@ export async function collectCrates(fetchImpl: Fetch, config: Config, now: Date 
   let nextRequestAt = 0;
   // crates.io requires at most one API request per second. The existing origin
   // shield and request coalescing keep cache misses from multiplying collections.
-  const limitedFetch: Fetch = async (url, init) => {
+  const getCrateJson = async (url: string) => {
     const wait = nextRequestAt - Date.now();
-    if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+    if (wait > 0) await beforeAbort(new Promise((resolve) => setTimeout(resolve, wait)), deadline);
     deadline.throwIfAborted();
     nextRequestAt = Date.now() + 1100;
-    return fetchImpl(url, { ...init, signal: AbortSignal.any([deadline, AbortSignal.timeout(6000)]) });
+    const signal = AbortSignal.any([deadline, AbortSignal.timeout(6000)]);
+    return getJson(fetchImpl, url, headers, signal);
   };
   for (let page = 1; page <= MAX_PAGES.crates; page += 1) {
     const url = `https://crates.io/api/v1/crates?user_id=${encodeURIComponent(config.cratesUserId)}&per_page=100&page=${page}`;
-    const { body } = await getJson(limitedFetch, url, headers);
+    const { body } = await getCrateJson(url);
     const list = isRecord(body) && Array.isArray(body.crates) ? (body.crates as unknown[]) : [];
     for (const crate of list) {
       if (!isRecord(crate)) continue;
@@ -275,7 +329,7 @@ export async function collectCrates(fetchImpl: Fetch, config: Config, now: Date 
   // with all bounded source pages. Missing enrichment never erases metadata.
   for (const [name, crate] of Object.entries(crates).slice(0, 30)) {
     try {
-      const { body } = await getJson(limitedFetch, `https://crates.io/api/v1/crates/${encodeURIComponent(name)}/downloads`, headers);
+      const { body } = await getCrateJson(`https://crates.io/api/v1/crates/${encodeURIComponent(name)}/downloads`);
       crate.downloads30Days.count = sumCrateDownloads(body, window);
     } catch {
       // Stop on a failure (including 429 or timeout); preserve completed counts
@@ -287,10 +341,11 @@ export async function collectCrates(fetchImpl: Fetch, config: Config, now: Date 
 }
 
 export async function collectNpm(fetchImpl: Fetch, config: Config) {
+  const signal = AbortSignal.timeout(SOURCE_BUDGET_MS);
   // The search API answers every package of a maintainer, scoped ones included,
   // with its version and monthly downloads — one request instead of one per package.
   const url = `https://registry.npmjs.org/-/v1/search?text=maintainer:${encodeURIComponent(config.npmMaintainer)}&size=250`;
-  const { body } = await getJson(fetchImpl, url, { "user-agent": config.userAgent });
+  const { body } = await getJson(fetchImpl, url, { "user-agent": config.userAgent }, signal);
   const packages: Record<string, PackageMetrics> = {};
   const objects = isRecord(body) && Array.isArray(body.objects) ? (body.objects as unknown[]) : [];
   for (const entry of objects) {
@@ -327,10 +382,11 @@ const INSTRUCTION_PACK = /^instructions\/[^/]+\.md$/u;
  * these counts instead of maintaining them by hand.
  */
 export async function collectSkills(fetchImpl: Fetch, config: Config): Promise<SkillsMetrics> {
+  const signal = AbortSignal.timeout(SOURCE_BUDGET_MS);
   const headers: Record<string, string> = { "user-agent": config.userAgent };
   if (config.githubToken) headers.authorization = `Bearer ${config.githubToken}`;
   const repo = `${encodeURIComponent(config.githubOrg)}/${encodeURIComponent(config.skillsRepo)}`;
-  const { body } = await getJson(fetchImpl, `https://api.github.com/repos/${repo}/git/trees/HEAD?recursive=1`, headers);
+  const { body } = await getJson(fetchImpl, `https://api.github.com/repos/${repo}/git/trees/HEAD?recursive=1`, headers, signal);
   if (!isRecord(body) || !Array.isArray(body.tree)) throw new Error("GitHub answered without a tree");
   if (body.truncated === true) throw new Error("The skills tree is too large for one request");
   const paths = (body.tree as unknown[]).flatMap((entry) => {

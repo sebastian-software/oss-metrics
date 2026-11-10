@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { collectGithub, collectMetrics, collectNpm, type Config, metricsResponse, repoOf, versionOfTag } from "../src/collect.ts";
+import { collectGithub, collectMetrics, collectNpm, collectReleases, collectSkills, collectCrates, type Config, metricsResponse, repoOf, versionOfTag } from "../src/collect.ts";
 
 const config: Config = {
   githubOrg: "sebastian-software",
@@ -342,4 +342,118 @@ test("a truncated or failing skills tree is an error that costs nothing else", a
   assert.equal(metrics.sources.skills, "error");
   assert.deepEqual(metrics.skills, { skills: {}, instructionPacks: 0 });
   assert.equal(metrics.sources.github, "ok");
+});
+
+
+test("every core source aborts stalled headers and streamed bodies within one budget", async (t) => {
+  const timeout = AbortSignal.timeout;
+  let controller = new AbortController();
+  const budgets: number[] = [];
+  t.mock.method(AbortSignal, "timeout", (milliseconds: number) => {
+    budgets.push(milliseconds);
+    return milliseconds === 10_000 ? controller.signal : timeout(milliseconds);
+  });
+  for (const collect of [collectGithub, collectReleases, collectNpm, collectSkills]) {
+    for (const phase of ["headers", "body"]) {
+      controller = new AbortController();
+      let cancelled = false;
+      let calls = 0;
+      const pending = collect(async (_url, init) => {
+        calls += 1;
+        assert.equal(init?.signal, controller.signal);
+        if (phase === "headers") {
+          queueMicrotask(() => controller.abort(new Error("source deadline")));
+          // Even a transport that ignores cancellation must not hold the snapshot.
+          return new Promise<Response>(() => {});
+        }
+        return new Response(new ReadableStream<Uint8Array>({
+          start(stream) { stream.enqueue(new TextEncoder().encode("[")); },
+          pull() { queueMicrotask(() => controller.abort(new Error("source deadline"))); },
+          cancel() { cancelled = true; },
+        }));
+      }, config);
+      await assert.rejects(pending, /source deadline/u);
+      assert.equal(controller.signal.aborted, true);
+      assert.equal(calls, 1);
+      assert.equal(cancelled, phase === "body", `${collect.name} ${phase} cancellation`);
+    }
+  }
+  assert.deepEqual(budgets, Array(8).fill(10_000));
+});
+
+test("GitHub REST and GraphQL pagination share the source deadline", async (t) => {
+  const timeout = AbortSignal.timeout;
+  let controller = new AbortController();
+  let created = 0;
+  t.mock.method(AbortSignal, "timeout", (milliseconds: number) => {
+    if (milliseconds !== 10_000) return timeout(milliseconds);
+    created += 1;
+    return controller.signal;
+  });
+  for (const collect of [collectGithub, collectReleases]) {
+    controller = new AbortController();
+    let calls = 0;
+    await assert.rejects(collect(async (_url, init) => {
+      assert.equal(init?.signal, controller.signal);
+      calls += 1;
+      if (calls === 1) return collect === collectGithub
+        ? json([], { link: '<https://api.github.com/next>; rel="next"' })
+        : json({ data: { organization: { repositories: {
+          nodes: [], pageInfo: { hasNextPage: true, endCursor: "second" },
+        } } } });
+      queueMicrotask(() => controller.abort(new Error("shared deadline")));
+      return new Promise<Response>(() => {});
+    }, config), /shared deadline/u);
+    assert.equal(calls, 2, "expiry prevents any further page");
+  }
+  assert.equal(created, 2, "one budget for each complete source, not each page");
+});
+
+test("a timed-out npm source preserves healthy release data and the short partial cache", async (t) => {
+  const timeout = AbortSignal.timeout;
+  const controllers = new Map<AbortSignal, AbortController>();
+  t.mock.method(AbortSignal, "timeout", (milliseconds: number) => {
+    if (milliseconds !== 10_000) return timeout(milliseconds);
+    const controller = new AbortController();
+    controllers.set(controller.signal, controller);
+    return controller.signal;
+  });
+  const healthy = upstream({ crates: () => json({ crates: [] }) });
+  let stalled: AbortSignal | null | undefined;
+  const metrics = await collectMetrics(async (url, init) => {
+    if (!url.startsWith("https://registry.npmjs.org/")) return healthy.fetchImpl(url, init);
+    stalled = init?.signal;
+    const controller = controllers.get(stalled!);
+    assert.ok(controller, "the npm source owns a deadline");
+    queueMicrotask(() => controller.abort(new Error("npm deadline")));
+    return new Promise<Response>(() => {});
+  }, { ...config, githubToken: "test-token" });
+  assert.equal(stalled?.aborted, true);
+  assert.equal(metrics.sources.npm, "error");
+  assert.equal(metrics.sources.github, "ok");
+  assert.equal(metrics.sources.releases, "ok");
+  assert.equal(metrics.sources.skills, "ok");
+  assert.equal(metrics.github.ferroni?.release?.version, "1.5.1");
+  assert.deepEqual(metrics.npm, {});
+  const response = metricsResponse(metrics);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("cache-control"), "public, max-age=60, s-maxage=300");
+});
+
+test("the crate request budget also cancels a stalled metadata body", async (t) => {
+  const timeout = AbortSignal.timeout;
+  const controller = new AbortController();
+  t.mock.method(AbortSignal, "timeout", (milliseconds: number) =>
+    milliseconds === 6000 ? controller.signal : timeout(milliseconds),
+  );
+  let cancelled = false;
+  await assert.rejects(collectCrates(async (_url, init) => {
+    assert.ok(init?.signal);
+    return new Response(new ReadableStream<Uint8Array>({
+      start(stream) { stream.enqueue(new TextEncoder().encode("{")); },
+      pull() { queueMicrotask(() => controller.abort(new Error("crate deadline"))); },
+      cancel() { cancelled = true; },
+    }));
+  }, config), /crate deadline/u);
+  assert.equal(cancelled, true);
 });
