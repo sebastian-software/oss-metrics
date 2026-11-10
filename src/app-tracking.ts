@@ -21,6 +21,17 @@ export type AppUsage = {
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 const invalid = () => new Error("App-tracking public feed unavailable");
+// Keep in sync with app-tracking's registered public projection catalog.
+const PUBLIC_PAIRS = new Set([
+  "ardo:events:cli.invocation",
+  "dalo:legacy:cli.invocation",
+  "dalo:events:cli.invocation",
+  "palamedes:legacy:cli.invocation",
+  "palamedes:events:cli.invocation",
+  "ferriki:events:resource.download",
+  "ferriki:events:language.use",
+]);
+const MAX_PUBLIC_ROWS = PUBLIC_PAIRS.size * 2 * 24;
 
 /** Reconstruct the allowlisted projection; never forward upstream extras. */
 export function checkedAppUsage(value: unknown, now = new Date()): AppUsage {
@@ -32,7 +43,7 @@ export function checkedAppUsage(value: unknown, now = new Date()): AppUsage {
     value.count_rounding !== 10 ||
     typeof value.snapshot_at !== "string" ||
     !Array.isArray(value.series) ||
-    value.series.length > 300
+    value.series.length > MAX_PUBLIC_ROWS
   )
     throw invalid();
   const snapshot = Date.parse(value.snapshot_at);
@@ -54,13 +65,11 @@ export function checkedAppUsage(value: unknown, now = new Date()): AppUsage {
       !/^\d{4}-(0[1-9]|1[0-2])-01$/.test(row.month) ||
       row.month < earliest ||
       row.month >= current ||
-      !["dalo", "palamedes", "ferriki"].includes(String(row.tool_id)) ||
-      !["legacy", "events"].includes(String(row.stream)) ||
+      typeof row.tool_id !== "string" ||
+      typeof row.stream !== "string" ||
+      typeof row.metric !== "string" ||
+      !PUBLIC_PAIRS.has(`${row.tool_id}:${row.stream}:${row.metric}`) ||
       !["local", "ci"].includes(String(row.mode)) ||
-      !["cli.invocation", "resource.download", "language.use"].includes(String(row.metric)) ||
-      (row.stream === "legacy" && (row.tool_id === "ferriki" || row.metric !== "cli.invocation")) ||
-      (row.stream === "events" &&
-        (row.tool_id === "ferriki") === (row.metric === "cli.invocation")) ||
       !["available", "unavailable"].includes(String(row.state)) ||
       (row.state === "available"
         ? typeof row.count !== "string" ||
