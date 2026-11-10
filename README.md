@@ -146,6 +146,11 @@ workflow-only and secret-only changes require a manual Bunny deployment.
   `METRICS_GITHUB_TOKEN` (a fine-grained token with read access to public
   repositories is enough); the deploy's smoke check passes a skipped source
   with a notice.
+- **Source deadlines:** GitHub REST, release GraphQL, npm, and skills each have
+  one ten-second budget covering response headers, streamed bodies, and every
+  pagination request. Expiry aborts that source and cancels body reads; healthy
+  sources still complete. Crates retain their six-second request / 40-second
+  collection limits and 1.1-second spacing; Rybbit retains its five-second budget.
 - **A failing source** is reported in `sources` with an empty map; the others
   still answer, and the document is cached for five minutes instead of an hour.
   When nothing answers: `502`, not cached.
