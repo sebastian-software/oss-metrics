@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { readFileSync } from "node:fs";
 import {
   APP_TRACKING_FEED,
   appUsageResponse,
@@ -148,5 +149,46 @@ test("the consumer route rejects filters and mutations before fetching", async (
     );
     assert.equal(response.status, expected);
     assert.equal(response.headers.get("cache-control"), "no-store");
+  }
+});
+
+// Validated with app-tracking checkedPublicUsage at
+// 01a9163cea2d0b25120233132c006f57b9c2edc4. Keep this fixture synchronized
+// when the source public catalog changes; do not fetch live production in tests.
+const publicContract = JSON.parse(readFileSync(
+  new URL("./fixtures/app-tracking-public.json", import.meta.url), "utf8",
+));
+test("the source catalog accepts unavailable Ardo coverage and the full 336-cell window", async () => {
+  const snapshot = new Date(publicContract.snapshot_at);
+  assert.deepEqual(checkedAppUsage(publicContract, snapshot), publicContract);
+  const full = {
+    ...publicContract,
+    series: Array.from({ length: 24 }, (_, index) => {
+      const month = new Date(Date.UTC(2026, 10 - index, 1)).toISOString().slice(0, 10);
+      return publicContract.series.flatMap((row: Record<string, unknown>) =>
+        ["local", "ci"].map((mode) => ({ ...row, month, mode })),
+      );
+    }).flat(),
+  };
+  assert.equal(full.series.length, 336);
+  const response = await appUsageResponse(async () => reply(full), snapshot);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.deepEqual(await response.json(), full);
+  assert.throws(() => checkedAppUsage({ ...full, series: [...full.series, full.series[0]] }, snapshot));
+  for (const change of [
+    { stream: "legacy" },
+    { metric: "language.use" },
+    { metric: "resource.download" },
+    { tool_id: "unknown" },
+  ]) {
+    assert.throws(() => checkedAppUsage({
+      ...publicContract, series: [{ ...publicContract.series[0], ...change }],
+    }, snapshot));
+  }
+  for (const count of ["20", "240"]) {
+    assert.equal(checkedAppUsage({
+      ...publicContract, series: [{ ...publicContract.series[0], state: "available", count }],
+    }, snapshot).series[0]?.count, count);
   }
 });
